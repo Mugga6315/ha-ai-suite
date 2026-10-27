@@ -1,0 +1,543 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "AI Suite servers",
+        "data": {
+          "decider_url": "Decision server URL",
+          "llm_url": "LLM server URL",
+          "thinking_off_kwarg": "Switch thinking per request (enable_thinking)"
+        },
+        "data_description": {
+          "decider_url": "The decision server for every agent's decision model. Base URL, without a path.",
+          "llm_url": "An OpenAI-compatible server, URL ending in /v1. Runs the agents' models and Second Brain's background jobs.",
+          "thinking_off_kwarg": "The answer model and the rule compiler then run without thinking, the background jobs with it. Turn off if the server rejects this field."
+        }
+      },
+      "reconfigure": {
+        "title": "AI Suite servers",
+        "data": {
+          "decider_url": "Decision server URL",
+          "llm_url": "LLM server URL",
+          "thinking_off_kwarg": "Switch thinking per request (enable_thinking)"
+        },
+        "data_description": {
+          "decider_url": "The decision server for every agent's decision model. Base URL, without a path.",
+          "llm_url": "An OpenAI-compatible server, URL ending in /v1. Runs the agents' models and Second Brain's background jobs.",
+          "thinking_off_kwarg": "The answer model and the rule compiler then run without thinking, the background jobs with it. Turn off if the server rejects this field."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The server does not answer"
+    },
+    "abort": {
+      "reconfigure_successful": "The servers have been changed"
+    }
+  },
+  "config_subentries": {
+    "conversation": {
+      "initiate_flow": {
+        "user": "Add conversation agent",
+        "reconfigure": "Change agent settings"
+      },
+      "entry_type": "Conversation agent",
+      "step": {
+        "user": {
+          "title": "Conversation agent",
+          "data": {
+            "name": "Name",
+            "prompt": "Instructions"
+          },
+          "data_description": {
+            "name": "The agent's name, as the voice assistant settings and its device show it.",
+            "prompt": "What the text model is told before every conversation. Templates allowed."
+          },
+          "sections": {
+            "models": {
+              "name": "Models",
+              "description": "Who answers: a decision model for simple commands, a text model for everything else.",
+              "data": {
+                "model": "Text model",
+                "temperature": "Temperature",
+                "decider": "Decision model first",
+                "decider_model": "Decision model",
+                "threshold": "Minimum confidence",
+                "answer_model": "Answer model",
+                "fallback_agent": "Fallback agent"
+              },
+              "data_description": {
+                "model": "Answers every request the decision model passes on, with the tools below.",
+                "temperature": "How much the text model's replies vary. Low values suit a voice assistant. Empty: the server's default.",
+                "decider": "A small decision model carries out simple commands (lights, timers, lists) itself, faster than the text model. Off: the text model answers every request.",
+                "decider_model": "The decision model this agent uses, from the decision server's models. Needed when the server offers several. Empty: the server's only model.",
+                "threshold": "How sure the decision model must be to act on its own, from 0 to 1. Below it, the request goes to the text model. Higher: fewer wrong actions, more requests passed on.",
+                "answer_model": "Words the reply after the decision model has acted, and splits a request with several commands. A small, fast model is enough. Empty: the text model.",
+                "fallback_agent": "Another conversation agent, such as a cloud assistant, that answers the requests the decision model passes on, in place of the text model. The answer model still words the decision model's replies. Empty: the text model."
+              }
+            },
+            "reasoning": {
+              "name": "Thinking",
+              "description": "How the text model reasons before it answers.",
+              "data": {
+                "thinking": "Thinking",
+                "reasoning_effort": "Reasoning effort",
+                "thinking_token_budget": "Thinking token budget",
+                "send_reasoning": "Send the model's earlier reasoning back"
+              },
+              "data_description": {
+                "thinking": "Turns thinking on or off, for models that support it. Empty: the server's default.",
+                "reasoning_effort": "How long the model thinks, for models that take an effort level. Empty: the server's default.",
+                "thinking_token_budget": "The most thinking tokens per request, for servers that support a limit. Empty: no limit.",
+                "send_reasoning": "In a turn with several rounds, the model sees what it thought before. Some thinking models need it, or their reply after a tool call can get lost. Recommended: on."
+              }
+            },
+            "tools": {
+              "name": "Tools",
+              "description": "What the text model can do and look up.",
+              "data": {
+                "llm_hass_api": "LLM APIs",
+                "hidden_tools": "Tools left out",
+                "parallel_tool_calls": "Allow parallel tool calls"
+              },
+              "data_description": {
+                "llm_hass_api": "The sets of tools the model may use, such as Assist (devices), AI Suite (its tool sets) and Second Brain (memory).",
+                "hidden_tools": "Tools the model does not get. The list shows the tools of the saved APIs: after changing the APIs, save and open again. Tools AI Suite replaces with its own are left out already.",
+                "parallel_tool_calls": "The model may call several tools in one round. Off: one tool per round."
+              }
+            },
+            "replies": {
+              "name": "Replies",
+              "description": "Checks and clean-up before the user hears a reply.",
+              "data": {
+                "reply_check": "Check each reply",
+                "strip_emojis": "Remove emojis from replies",
+                "max_message_history": "Earlier exchanges kept"
+              },
+              "data_description": {
+                "reply_check": "A reply in the wrong language, with numbers no tool gave, or with raw text is written once more, unless the model has already acted. Costs time only on such a reply.",
+                "strip_emojis": "Removes emojis before the reply is spoken.",
+                "max_message_history": "How many earlier exchanges of the conversation the text model sees. Empty: all."
+              }
+            }
+          }
+        },
+        "reconfigure": {
+          "title": "Conversation agent",
+          "data": {
+            "prompt": "Instructions"
+          },
+          "data_description": {
+            "prompt": "What the text model is told before every conversation. Templates allowed."
+          },
+          "sections": {
+            "models": {
+              "name": "Models",
+              "description": "Who answers: a decision model for simple commands, a text model for everything else.",
+              "data": {
+                "model": "Text model",
+                "temperature": "Temperature",
+                "decider": "Decision model first",
+                "decider_model": "Decision model",
+                "threshold": "Minimum confidence",
+                "answer_model": "Answer model",
+                "fallback_agent": "Fallback agent"
+              },
+              "data_description": {
+                "model": "Answers every request the decision model passes on, with the tools below.",
+                "temperature": "How much the text model's replies vary. Low values suit a voice assistant. Empty: the server's default.",
+                "decider": "A small decision model carries out simple commands (lights, timers, lists) itself, faster than the text model. Off: the text model answers every request.",
+                "decider_model": "The decision model this agent uses, from the decision server's models. Needed when the server offers several. Empty: the server's only model.",
+                "threshold": "How sure the decision model must be to act on its own, from 0 to 1. Below it, the request goes to the text model. Higher: fewer wrong actions, more requests passed on.",
+                "answer_model": "Words the reply after the decision model has acted, and splits a request with several commands. A small, fast model is enough. Empty: the text model.",
+                "fallback_agent": "Another conversation agent, such as a cloud assistant, that answers the requests the decision model passes on, in place of the text model. The answer model still words the decision model's replies. Empty: the text model."
+              }
+            },
+            "reasoning": {
+              "name": "Thinking",
+              "description": "How the text model reasons before it answers.",
+              "data": {
+                "thinking": "Thinking",
+                "reasoning_effort": "Reasoning effort",
+                "thinking_token_budget": "Thinking token budget",
+                "send_reasoning": "Send the model's earlier reasoning back"
+              },
+              "data_description": {
+                "thinking": "Turns thinking on or off, for models that support it. Empty: the server's default.",
+                "reasoning_effort": "How long the model thinks, for models that take an effort level. Empty: the server's default.",
+                "thinking_token_budget": "The most thinking tokens per request, for servers that support a limit. Empty: no limit.",
+                "send_reasoning": "In a turn with several rounds, the model sees what it thought before. Some thinking models need it, or their reply after a tool call can get lost. Recommended: on."
+              }
+            },
+            "tools": {
+              "name": "Tools",
+              "description": "What the text model can do and look up.",
+              "data": {
+                "llm_hass_api": "LLM APIs",
+                "hidden_tools": "Tools left out",
+                "parallel_tool_calls": "Allow parallel tool calls"
+              },
+              "data_description": {
+                "llm_hass_api": "The sets of tools the model may use, such as Assist (devices), AI Suite (its tool sets) and Second Brain (memory).",
+                "hidden_tools": "Tools the model does not get. The list shows the tools of the saved APIs: after changing the APIs, save and open again. Tools AI Suite replaces with its own are left out already.",
+                "parallel_tool_calls": "The model may call several tools in one round. Off: one tool per round."
+              }
+            },
+            "replies": {
+              "name": "Replies",
+              "description": "Checks and clean-up before the user hears a reply.",
+              "data": {
+                "reply_check": "Check each reply",
+                "strip_emojis": "Remove emojis from replies",
+                "max_message_history": "Earlier exchanges kept"
+              },
+              "data_description": {
+                "reply_check": "A reply in the wrong language, with numbers no tool gave, or with raw text is written once more, unless the model has already acted. Costs time only on such a reply.",
+                "strip_emojis": "Removes emojis before the reply is spoken.",
+                "max_message_history": "How many earlier exchanges of the conversation the text model sees. Empty: all."
+              }
+            }
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The agent has been changed"
+      },
+      "error": {
+        "decider_cannot_connect": "The decision server does not answer",
+        "decider_model_needed": "The decision server offers several models: pick a decision model"
+      }
+    },
+    "memory": {
+      "entry_type": "Memory",
+      "initiate_flow": {
+        "user": "Add memory",
+        "reconfigure": "Change memory settings"
+      },
+      "step": {
+        "user": {
+          "title": "Memory",
+          "description": "Second Brain: a memory for the assistant, kept as markdown files in a folder. The librarian and self-improvement are added afterwards as features of their own.",
+          "data": {
+            "store_location": "Store location",
+            "llm_model": "Background model"
+          },
+          "data_description": {
+            "store_location": "The folder of the memory store. A folder that already holds a store is used as it is. Default: a second_brain folder in the Home Assistant config folder.",
+            "llm_model": "Runs the librarian, the rule compiler and self-improvement in the background, on AI Suite's LLM server."
+          }
+        },
+        "reconfigure": {
+          "title": "Memory",
+          "data": {
+            "store_location": "Store location",
+            "llm_model": "Background model"
+          },
+          "data_description": {
+            "store_location": "The folder of the memory store. A folder that already holds a store is used as it is. Default: a second_brain folder in the Home Assistant config folder.",
+            "llm_model": "Runs the librarian, the rule compiler and self-improvement in the background, on AI Suite's LLM server."
+          }
+        },
+        "store_info": {
+          "title": "Existing store found",
+          "description": "The folder already holds a memory store: {found}.\n\nAI Suite uses these files as they are. Submit to continue."
+        }
+      },
+      "error": {
+        "unsafe_store_location": "{error}"
+      },
+      "abort": {
+        "already_configured": "Memory is already added. Change its settings instead.",
+        "reconfigure_successful": "The memory settings have been changed"
+      }
+    },
+    "history": {
+      "entry_type": "History",
+      "initiate_flow": {
+        "user": "Add history",
+        "reconfigure": "Change history settings"
+      },
+      "step": {
+        "user": {
+          "title": "History",
+          "description": "Lets the assistant answer from Home Assistant's recorded past: long-term statistics such as energy used or an average temperature, and when a device last changed. Remove it to turn these tools off.",
+          "data": {
+            "unexposed_entities": "Read unexposed entities"
+          },
+          "data_description": {
+            "unexposed_entities": "On: the history tools may read any entity Home Assistant records, also the ones not exposed to voice assistants. Off: only exposed entities."
+          }
+        },
+        "reconfigure": {
+          "title": "History",
+          "description": "Remove it to turn these tools off.",
+          "data": {
+            "unexposed_entities": "Read unexposed entities"
+          },
+          "data_description": {
+            "unexposed_entities": "On: the history tools may read any entity Home Assistant records, also the ones not exposed to voice assistants. Off: only exposed entities."
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The settings have been changed",
+        "already_configured": "This tool set is already added. Change or remove the existing one."
+      }
+    },
+    "calendar": {
+      "entry_type": "Calendar",
+      "initiate_flow": {
+        "user": "Add calendar",
+        "reconfigure": "Change calendar settings"
+      },
+      "step": {
+        "user": {
+          "title": "Calendar",
+          "description": "Lets the assistant read every exposed calendar at once, each entry with its weekday. No settings: remove it to turn these tools off."
+        },
+        "reconfigure": {
+          "title": "Calendar",
+          "description": "No settings: remove it to turn these tools off."
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The settings have been changed",
+        "already_configured": "This tool set is already added. Change or remove the existing one."
+      }
+    },
+    "librarian": {
+      "entry_type": "Librarian",
+      "initiate_flow": {
+        "user": "Add librarian",
+        "reconfigure": "Change librarian settings"
+      },
+      "step": {
+        "user": {
+          "title": "Librarian",
+          "description": "Consolidates the memories into the store's wiki each night, with Memory's background model.",
+          "data": {
+            "consolidate_enabled": "Nightly run",
+            "consolidate_time": "Time",
+            "consolidate_effort": "Thinking effort"
+          },
+          "data_description": {
+            "consolidate_enabled": "Off: the librarian runs only when its action (ai_suite.consolidate) is called.",
+            "consolidate_time": "When the nightly run starts.",
+            "consolidate_effort": "How long the background model thinks during the run. Higher is more thorough and slower."
+          }
+        },
+        "reconfigure": {
+          "title": "Librarian",
+          "description": "Consolidates the memories into the store's wiki each night, with Memory's background model.",
+          "data": {
+            "consolidate_enabled": "Nightly run",
+            "consolidate_time": "Time",
+            "consolidate_effort": "Thinking effort"
+          },
+          "data_description": {
+            "consolidate_enabled": "Off: the librarian runs only when its action (ai_suite.consolidate) is called.",
+            "consolidate_time": "When the nightly run starts.",
+            "consolidate_effort": "How long the background model thinks during the run. Higher is more thorough and slower."
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The settings have been changed",
+        "already_configured": "This feature is already added. Change or remove the existing one.",
+        "memory_needed": "Add Memory (Second Brain) first: this feature works on its store."
+      }
+    },
+    "emby": {
+      "entry_type": "Emby",
+      "initiate_flow": {
+        "user": "Add Emby",
+        "reconfigure": "Change Emby settings"
+      },
+      "step": {
+        "user": {
+          "title": "Emby",
+          "description": "Lets the assistant search an Emby library and start playback on a player.",
+          "data": {
+            "emby_url": "Server URL",
+            "emby_api_key": "API key",
+            "wake_entities": "Android TV players"
+          },
+          "data_description": {
+            "emby_url": "The Emby server, e.g. `http://localhost:8096`. Set both URL and API key, or neither.",
+            "emby_api_key": "From the Emby dashboard, under API Keys.",
+            "wake_entities": "The players woken before playback. Empty: any Android TV."
+          }
+        },
+        "reconfigure": {
+          "title": "Emby",
+          "description": "Lets the assistant search an Emby library and start playback on a player.",
+          "data": {
+            "emby_url": "Server URL",
+            "emby_api_key": "API key",
+            "wake_entities": "Android TV players"
+          },
+          "data_description": {
+            "emby_url": "The Emby server, e.g. `http://localhost:8096`. Set both URL and API key, or neither.",
+            "emby_api_key": "From the Emby dashboard, under API Keys.",
+            "wake_entities": "The players woken before playback. Empty: any Android TV."
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "{error}"
+      },
+      "abort": {
+        "reconfigure_successful": "The settings have been changed",
+        "already_configured": "This tool set is already added. Change or remove the existing one."
+      }
+    },
+    "self_improve": {
+      "entry_type": "Self-improvement",
+      "initiate_flow": {
+        "user": "Add self-improvement",
+        "reconfigure": "Change self-improvement settings"
+      },
+      "step": {
+        "user": {
+          "title": "Self-improvement",
+          "description": "Reviews each turn the text model answers and notes misfires and detours. A nightly pass turns repeated notes into rules the assistant reads on every turn. Costs one background-model request per reviewed turn.",
+          "data": {
+            "self_improve_effort": "Thinking effort",
+            "learn_time": "Time of the nightly pass"
+          },
+          "data_description": {
+            "self_improve_effort": "How long the background model thinks per review and in the nightly pass. Higher is more thorough and slower.",
+            "learn_time": "When the notes are turned into rules. The pass also runs on demand with the action ai_suite.learn."
+          }
+        },
+        "reconfigure": {
+          "title": "Self-improvement",
+          "description": "Reviews each turn the text model answers and notes misfires and detours. A nightly pass turns repeated notes into rules the assistant reads on every turn.",
+          "data": {
+            "self_improve_effort": "Thinking effort",
+            "learn_time": "Time of the nightly pass"
+          },
+          "data_description": {
+            "self_improve_effort": "How long the background model thinks per review and in the nightly pass. Higher is more thorough and slower.",
+            "learn_time": "When the notes are turned into rules. The pass also runs on demand with the action ai_suite.learn."
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The settings have been changed",
+        "already_configured": "This feature is already added. Change or remove the existing one.",
+        "memory_needed": "Add Memory (Second Brain) first: this feature works on its store."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Trace monitor",
+        "description": "Sends each turn of the AI Suite agents to a trace monitor: the decisions, the model calls, the tools, the state changes the turn caused and, for voice turns, the pipeline's timings.",
+        "data": {
+          "monitor_enabled": "Send turns to the monitor",
+          "monitor_url": "Monitor URL",
+          "monitor_token": "Ingest token",
+          "monitor_audio": "Send speech audio"
+        },
+        "data_description": {
+          "monitor_enabled": "Off: nothing is recorded or sent, and the URL and token may stay empty.",
+          "monitor_url": "The monitor's base URL, without a path, such as http://192.0.2.10:8000.",
+          "monitor_token": "The bearer token the monitor accepts for its ingest, from its token file.",
+          "monitor_audio": "Also uploads each voice turn's wake word and speech recording. Needs `assist_pipeline: debug_recording_dir:` in configuration.yaml. AI Suite deletes each run folder after uploading it."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Not an http or https URL",
+      "cannot_connect": "The monitor does not answer",
+      "invalid_auth": "The monitor does not accept this token",
+      "not_a_monitor": "This server has no trace monitor ingest",
+      "unknown": "The monitor gave an unexpected answer"
+    }
+  },
+  "issues": {
+    "no_agent_selected": {
+      "title": "No conversation agent is using Second Brain",
+      "description": "Memory is set up, but no conversation agent uses Second Brain, so the assistant has no access to your notes and cannot remember anything.\n\nOpen the agent's settings (Settings > Devices & services > AI Suite, Configure on the agent) and tick **Second Brain** under Tools > LLM APIs."
+    },
+    "calendars_not_exposed": {
+      "title": "Calendars are not exposed to the assistant",
+      "description": "`get_calendar_events` can only read calendars that are exposed to Assist, and Home Assistant does not expose the calendar domain by default - so appointment questions currently return nothing.\n\nGo to Settings > Voice assistants > Expose and expose the calendars you want the assistant to read."
+    },
+    "store_unavailable": {
+      "title": "Memory is off: its store cannot be used",
+      "description": "{problem}\n\nThe conversation agents keep working without memory. Change the store's location in the Memory settings."
+    },
+    "store_offline": {
+      "title": "Memory is waiting for its store",
+      "description": "The store at {path} was set up before and is not there now: is the network share offline?\n\nThe conversation agents keep working without memory. When a turn needs memory, AI Suite looks for the store again (at most every 5 minutes) and reloads once it is back."
+    },
+    "memory_api_taken": {
+      "title": "Memory is off: another integration serves its LLM API",
+      "description": "The LLM API `{api_id}` is already served, most likely by the separate Second Brain integration. AI Suite's memory replaces it: remove the Second Brain integration, then reload AI Suite."
+    }
+  },
+  "selector": {
+    "thinking": {
+      "options": {
+        "on": "On",
+        "off": "Off"
+      }
+    },
+    "reasoning_effort": {
+      "options": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      }
+    },
+    "effort": {
+      "options": {
+        "none": "None",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "status": {
+        "name": "Status"
+      }
+    }
+  },
+  "exceptions": {
+    "llm_server_unreachable": {
+      "message": "The LLM server does not answer: {error}"
+    },
+    "llm_server_error": {
+      "message": "The LLM server returned an error. Check the system log for details."
+    },
+    "no_text_model": {
+      "message": "{entity_id} has no text model set, so it cannot answer this request."
+    },
+    "not_loaded": {
+      "message": "AI Suite is not loaded."
+    },
+    "feature_missing": {
+      "message": "This needs the {feature} feature and a running Memory. Add it on the AI Suite entry, or check the log for why Memory did not start."
+    },
+    "run_failed": {
+      "message": "The run changed nothing: {reason}"
+    }
+  },
+  "services": {
+    "consolidate": {
+      "name": "Consolidate memories",
+      "description": "Runs the librarian now: merges the raw memories into curated wiki pages and moves misfiled facts out of the rules. New memories wait until it finishes, up to 10 minutes on a slow model. Returns a summary of what it changed. Fails when the model gives no usable plan or one past the limits."
+    },
+    "learn": {
+      "name": "Learn from failures",
+      "description": "Runs the self-improvement pass now: turns a repeated pattern in failures.md into a rule in self_improving.md, retracts learned rules that went wrong, and marks what it handled. Returns a summary of what it changed. Fails when the model gives no usable plan or one past the limits."
+    }
+  }
+}

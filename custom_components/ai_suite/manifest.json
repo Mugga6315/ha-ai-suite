@@ -1,0 +1,26 @@
+{
+  "domain": "ai_suite",
+  "name": "AI Suite",
+  "after_dependencies": [
+    "assist_pipeline",
+    "recorder"
+  ],
+  "codeowners": [
+    "@Mugga6315"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "conversation",
+    "intent"
+  ],
+  "documentation": "https://github.com/Mugga6315/ha-ai-suite",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Mugga6315/ha-ai-suite/issues",
+  "requirements": [
+    "openai>=2.21.0",
+    "demoji>=1.1.0"
+  ],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}
