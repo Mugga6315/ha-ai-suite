@@ -48,6 +48,8 @@ DOMAINS = {
         readable=True, switched=True,
         changes={"switched_on": frozenset({"on", "playing", "paused", "idle", "buffering"}), "switched_off": _OFF},
     ),
+    # A TV's or receiver's remote: HA's TV integrations switch the device through it.
+    "remote": Domain(readable=True, switched=True, changes=_SWITCHED),
     "sensor": Domain(readable=True),
     "switch": Domain(readable=True, switched=True, changes=_SWITCHED),
     "todo": Domain(),  # the lists (lists.py)

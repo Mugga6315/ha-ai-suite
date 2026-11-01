@@ -27,6 +27,7 @@ from .decision import (
     only_of_its_kind,
     parse_brightness,
     parse_temperature,
+    previous_user_text,
     spelled_out,
     state_text,
     with_rules,
@@ -126,7 +127,10 @@ OTHER_ROOM = "another room"
 
 # A light request for a room that names no light means every light there, as HA's own sentences have it; the form's
 # one device would leave the other lights on while the reply claims the room.
-# In a sure room with several lights the decider says which is meant; code acts on the room only for these.
+# In a sure room with several lights the decider says which is meant (the scope question); code acts on the room only
+# for these actions. The decider is asked only with a room word in the request or the user's turn before, the
+# decider's room at the run-off bar (it may give a device's own room to a request that names none), and a request for
+# lights (`asks_for_lights`): "Turn on the TV" is none. A satellite's own room: command.py `_means_the_rooms_lights`.
 ROOM_ACTIONS = frozenset({"turn_on", "turn_off", "set_brightness"})
 ALL_LIGHTS = "all"
 SCOPE_QUESTION = {"type": "choice", "instructions": "Does the user mean one particular light, or all lights in the room?",
@@ -173,6 +177,13 @@ class Form:
     room_wide: bool = False  # every light in the room, not one device
     change: str | None = None  # which change of a device is asked, for the changed action (changes.py)
     action_from_rule: bool = False  # a household rule set the action (household.follow): it counts as the lock words
+    room_named: bool = False  # a room word in the request or the user's turn before; else the room is a guess
+    room_clear: bool = False  # the decider's room answer clears the run-off bar
+
+    @property
+    def names_room(self) -> bool:
+        """Whether the user named the form's room: a household rule only for requests without one does not apply."""
+        return self.room != NO_ROOM and self.room_named
 
 
 def devices_for_form(entities: list[Candidate]) -> dict[str, Candidate]:
@@ -236,6 +247,11 @@ async def decider_form(
         return Form(True, NO_ACTION, NO_ROOM, NO_DEVICE, None)
     route = await _route(client, state, answers, threshold)
     room, p = _answer(answers, "room")
+    if room == OTHER_ROOM and route in _DEVICE_ROUTES and names_a_room(text, areas):
+        # A room the menu lacks may be one of the home's in another language and misheard ("Schafzimmer" for
+        # Bedroom): a decider cannot tell that from a missing room, the text model can. It matters only where the
+        # room picks the device.
+        raise HandOff("another room: a room word the menu lacks")
     sure_room = room if _passes("room", p, threshold) and room not in (NO_ROOM, OTHER_ROOM) else None
     # The change first: its devices make the menu (a lock word means the lock, not the door sensor beside it).
     change = await _change_asked(client, state, text, language, threshold) if route == CHANGED else None
@@ -245,7 +261,7 @@ async def decider_form(
         # An unsure room matters only where it picks the device: a question about an appointment is sure as a
         # calendar question, and its room does not matter.
         if route in _DEVICE_ROUTES and not await _stands_without_room(room, device, devices, text, state, areas, language):
-            raise HandOff(f"room {room} p={p:.2f}")
+            raise HandOff(_unsure(f"room {room}", p, threshold))
         room = NO_ROOM
     if action == CHAT:
         await _confirm_chat(client, state, threshold)
@@ -255,9 +271,15 @@ async def decider_form(
         if action == PLAY else None
     statistic = _sure(await _ask(client, state, {"statistic": STATISTIC_QUESTION}), "statistic", threshold) \
         if action == PAST else None
-    room_wide = action in ROOM_ACTIONS and sure_room is not None and lights_in(devices, sure_room) > 1 and \
+    before = previous_user_text(state)
+    room_named = names_a_room(text, areas) or names_a_room(before, areas)
+    # A room a request names is sure well above the bar; the decider gave rooms no word names well below it.
+    room_clear = _passes("room_clear", p, _run_off(threshold))
+    room_wide = action in ROOM_ACTIONS and sure_room is not None and room_named and room_clear and \
+        lights_in(devices, sure_room) > 1 and asks_for_lights(action, text) and \
         _sure(await _ask(client, state, {"scope": SCOPE_QUESTION}), "scope", threshold) == ALL_LIGHTS
-    return Form(False, action, room, device, _value_in(text, action), media, statistic, room_wide, change)
+    return Form(False, action, room, device, _value_in(text, action), media, statistic, room_wide, change,
+                room_named=room_named, room_clear=room_clear)
 
 
 async def _stands_without_room(
@@ -316,10 +338,10 @@ async def _route(client: DecisionClient, state: str, answers: dict[str, dict], t
         return choice
     likeliest = sorted(answers["route"].get("probabilities") or {}, key=answers["route"]["probabilities"].get)[-2:]
     if len(likeliest) < 2:
-        raise HandOff(f"route {choice} p={p:.2f}")
+        raise HandOff(_unsure(f"route {choice}", p, threshold))
     question = {"type": "choice", "instructions": "What does the user want?",
                 "criteria": {route: ROUTES[route] for route in reversed(likeliest)}}
-    return _sure(await _ask(client, state, {"route": question}), "route", (1 + threshold) / 2)
+    return _sure(await _ask(client, state, {"route": question}), "route", _run_off(threshold))
 
 
 async def _route_answers(
@@ -407,7 +429,7 @@ async def ask_sure(client: DecisionClient, state: str, question: dict, threshold
     """The decider's sure answer to one choice question; HandOff when it is unsure or the server fails."""
     choice, p = _answer(await _ask(client, state, {"q": question}), "q")
     if _below("q", p, threshold):
-        raise HandOff(f"{question['instructions']} {choice} p={p:.2f}")
+        raise HandOff(_unsure(f"{question['instructions']} {choice}", p, threshold))
     return choice
 
 
@@ -476,8 +498,23 @@ def _room_menu(areas: dict[str, list[str]]) -> dict[str, str | None]:
 def _sure(answers: dict[str, dict], question: str, threshold: float) -> str:
     choice, p = _answer(answers, question)
     if _below(question, p, threshold):
-        raise HandOff(f"{question} {choice} p={p:.2f}")
+        raise HandOff(_unsure(f"{question} {choice}", p, threshold))
     return choice
+
+
+def asks_for_lights(action: str, text: str) -> bool:
+    """Whether a request may be for all of a room's lights: a light word in it, or dimming, which only lights do.
+
+    HA's own sentences dim a room by its name alone. A light word of the turn before does not count: the request after
+    it may be for another device. Dimming counts only where the decider then says all lights are meant (the scope
+    question): "Dimme sie auf 30 Prozent" after one lamp is about that lamp.
+    """
+    return action == "set_brightness" or LIGHT_WORDS.search(text) is not None
+
+
+def _run_off(threshold: float) -> float:
+    """The bar halfway between the threshold and certainty: (1 + threshold) / 2, 0.75 at the default 0.5."""
+    return (1 + threshold) / 2
 
 
 def _passes(qid: str, p: float, bar: float) -> bool:
@@ -493,6 +530,11 @@ def _below(qid: str, p: float, bar: float) -> bool:
     """
     recorder.bar(qid, bar)
     return p < bar
+
+
+def _unsure(answer: str, p: float, bar: float) -> str:
+    """The hand-off reason for an answer below its bar, with the bar: the run-off's is not the threshold."""
+    return f"{answer} p={p:.2f} < {bar:.2f}"
 
 
 def _answer(answers: dict[str, dict], question: str) -> tuple[str, float]:

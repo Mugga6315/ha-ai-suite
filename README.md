@@ -36,17 +36,19 @@ Second Brain gives the assistant a memory it keeps as plain markdown in a git re
 
 The decision model handles:
 
-- switching lights, switches, fans, speakers and thermostats on and off, brightness, temperature, covers and their
-  position, locks;
+- switching lights, switches, fans, speakers, TVs (through their remote) and thermostats on and off, brightness,
+  temperature, covers and their position, locks;
 - media: play a song, artist, album, playlist or radio station (through Music Assistant), pause, resume, skip,
   volume, mute;
 - shopping and to-do lists: add, tick off, remove, read;
 - the current state or value of a device or sensor;
-- the weather of a coming day or days, what is in the calendar on a day, or when an appointment is or was;
+- the weather of a coming day or days, what is in the calendar on a day, what comes next or came last, or when an
+  appointment is or was;
 - a sensor's highest, lowest, average or total value on an earlier day, and when a device last changed;
 - thanks and greetings; a request to remember something goes to the text model, which files it.
 
 Requests with several commands ("turn off the lights and close the blinds") are split and carried out part by part.
+A play or a volume change counts as done only when the player shows it.
 
 ## Requirements
 
@@ -127,7 +129,10 @@ Each agent is a conversation agent you can select in a voice assistant. Add as m
 The model sees only entities exposed to voice assistants (Settings > Voice assistants > Expose); the History tools
 can read more, see their setting below. Each tool reaches the model under a plain name (`HassTurnOn`, not
 `intent__HassTurnOn`), which small models call more reliably. Where an AI Suite tool does a Home Assistant tool's job
-better, the model gets only AI Suite's: the calendar tool replaces `get_events`.
+better, the model gets only AI Suite's: the calendar tool replaces `get_events`. Home Assistant's play and volume
+tools are checked: when nothing starts, the player keeps playing what it played, its volume does not change or it is
+unavailable, the tool fails and the model says so, instead of confirming what did not happen. A tool that fails is
+not run again with the same arguments in the same request.
 
 **Replies**
 
@@ -136,6 +141,8 @@ better, the model gets only AI Suite's: the calendar tool replaces `get_events`.
 | **Check each reply** | Default on. Checks the reply for a wrong language, numbers no tool gave, or raw tool-call text, and has it written once more. A request in which the model already acted is not retried. |
 | **Remove emojis from replies** | Default off. Removes emojis before the reply is spoken. |
 | **Earlier exchanges kept** | How many earlier exchanges the model sees. 0: only the current request. Empty: all. |
+
+A reply without any text is asked for once more; empty again, the request fails with an error that is spoken.
 
 ## Tool sets
 
@@ -161,12 +168,17 @@ raises a repair issue while none are.
 
 ### Emby
 
-`count_emby`, `search_emby`, `recent_emby`, `now_playing_emby`, `next_up_emby` and `play_emby` search and play an
-Emby (or Jellyfin) library.
+`count_emby`, `search_emby`, `recent_emby`, `now_playing_emby`, `next_up_emby`, `play_emby` and `control_emby`
+search and play an Emby (or Jellyfin) library, and pause, resume or stop what a player plays.
 
 - **Server URL** and **API key**: both or neither.
-- **Android TV players** (optional): a player that is not connected yet gets Kodi started on it before playback.
-  Empty: any Android TV player.
+- **Android TV players** (optional): a player that is not connected yet is woken and gets Kodi started on it, through
+  the Android TV integration (ADB, `androidtv.adb_command`; players of the Android TV Remote integration are not
+  started). Empty: any Android TV player.
+
+`play_emby` answers at once when it starts a player; the item plays once Kodi connects to Emby, within 20 seconds
+(behind a proxy, which hides the player's address from Emby, after the 20 seconds). A start that fails is said on the
+voice satellite that took the request, or shown as a notification.
 
 ## Memory (Second Brain)
 

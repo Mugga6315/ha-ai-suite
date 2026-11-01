@@ -1,6 +1,7 @@
 """English. No HA imports."""
 
 from .words import (
+    Calendar,
     Days,
     Language,
     Lights,
@@ -45,6 +46,16 @@ LANGUAGE = Language(
         window=r"last|past|next|coming",
         time_units=r"seconds?|minutes?|hours?|days?|weeks?|months?|years?",
         clock=r"am|pm|a\.m\.|p\.m\.|o'clock",
+    ),
+    calendar=Calendar(
+        next_up=r"\bnext\b|\bupcoming\b|\bcoming up\b",
+        last_up=r"\blast\b|\blatest\b|\bmost recent\b",
+        words=frozenset({"appointment", "appointments", "calendar", "event", "events", "entry", "entries"}),
+        several=r"\bappointments\b|\bevents\b|\bentries\b",
+        filler=frozenset({
+            "what", "s", "which", "when", "is", "are", "was", "were", "do", "did", "i", "have", "had", "has", "there",
+            "on", "in", "at", "for", "my", "our", "the", "a", "an", "me", "up", "please", "schedule", "agenda",
+        }),
     ),
     reads=Reads(
         temperature=r"temperature|\b(?:hot|cold)\b",
@@ -122,6 +133,7 @@ LANGUAGE = Language(
             "read_climate": "{name} is at {current}, set to {target}.",
             "read_weather": "{name}: {condition}, {temperature}.",
             "read_media": "{name} is {state}: {playing}.",
+            "playback_not_started": "Playback on {player} could not be started.",
         },
         media_labels={"media_title": "title", "media_artist": "artist", "media_album_name": "album"},
         decimal_comma=False,

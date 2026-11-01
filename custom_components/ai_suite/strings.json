@@ -365,7 +365,7 @@
           "data_description": {
             "emby_url": "The Emby server, e.g. `http://localhost:8096`. Set both URL and API key, or neither.",
             "emby_api_key": "From the Emby dashboard, under API Keys.",
-            "wake_entities": "The players woken before playback. Empty: any Android TV."
+            "wake_entities": "The players woken and started before playback, through the Android TV integration (ADB). Empty: any Android TV."
           }
         },
         "reconfigure": {
@@ -379,7 +379,7 @@
           "data_description": {
             "emby_url": "The Emby server, e.g. `http://localhost:8096`. Set both URL and API key, or neither.",
             "emby_api_key": "From the Emby dashboard, under API Keys.",
-            "wake_entities": "The players woken before playback. Empty: any Android TV."
+            "wake_entities": "The players woken and started before playback, through the Android TV integration (ADB). Empty: any Android TV."
           }
         }
       },
@@ -516,6 +516,9 @@
     },
     "llm_server_error": {
       "message": "The LLM server returned an error. Check the system log for details."
+    },
+    "empty_reply": {
+      "message": "The language model gave no answer, twice. Please ask again."
     },
     "no_text_model": {
       "message": "{entity_id} has no text model set, so it cannot answer this request."

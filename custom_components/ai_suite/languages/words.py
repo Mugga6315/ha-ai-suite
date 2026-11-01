@@ -37,6 +37,17 @@ class Time:
 
 
 @dataclass(frozen=True, slots=True)
+class Calendar:
+    """What a calendar question asks besides a day or an entry's name (decider/calendar.py)."""
+
+    next_up: str  # the entries coming next, none named: what's next, upcoming
+    last_up: str  # the most recent entries, none named: my last appointment
+    words: frozenset[str]  # words for an entry or the calendar itself, never part of an entry's name
+    several: str  # the plural of an entry word: a question for more than one (my last appointments)
+    filler: frozenset[str]  # the other words of a question that names nothing: what, is, my, on
+
+
+@dataclass(frozen=True, slots=True)
 class Reads:
     """What a question about a device's state asks (decider/command.py, decider/decision.py)."""
 
@@ -139,7 +150,7 @@ class Numbers:
 
 @dataclass(frozen=True, slots=True)
 class Replies:
-    """What the decider says itself (decider/decision.py)."""
+    """What AI Suite says itself: the decider's replies (decider/decision.py), a failed Emby start (tools/emby.py)."""
 
     speech: dict[str, str]  # by reply: the sentence, its slots in braces
     media_labels: dict[str, str]  # by media attribute: its label
@@ -156,6 +167,7 @@ class Language:
     function_words: frozenset[str]  # common words only this language has, to tell a reply's language
     days: Days
     time: Time
+    calendar: Calendar
     reads: Reads
     requests: Requests
     rooms: Rooms

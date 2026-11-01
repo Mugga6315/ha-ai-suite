@@ -1,6 +1,7 @@
 """German. No HA imports."""
 
 from .words import (
+    Calendar,
     Days,
     Language,
     Lights,
@@ -46,6 +47,19 @@ LANGUAGE = Language(
         window=r"letzten|vergangenen|nächsten|kommenden",
         time_units=r"sekunden?|minuten?|stunden?|tagen?|tage|wochen?|monaten?|monate|jahren?|jahre",
         clock=r"uhr",
+    ),
+    calendar=Calendar(
+        next_up=r"\b(?:als )?n(?:ä|ae)chste[nrs]?\b|\bdemn(?:ä|ae)chst\b|\b(?:bevor|an)stehende?[nrs]?\b",
+        last_up=r"\bletzte[mnrs]?\b|\bzuletzt\b",
+        words=frozenset({"termin", "termine", "kalender", "eintrag", "einträge", "eintraege"}),
+        several=r"\btermine\b|\beinträge\b|\beintraege\b",
+        filler=frozenset({
+            "was", "welche", "welcher", "welches", "wann", "wie", "gibt", "es", "steht", "stehen", "stand", "standen",
+            "kommt", "kommen", "an", "als", "ist", "sind", "war", "waren", "hatte", "hatten", "habe", "hab", "ich",
+            "mir", "mein", "meine", "meinem", "meinen", "meiner", "wir", "uns", "unser", "unsere", "unserem",
+            "unseren", "der", "die", "das", "dem", "den", "des", "ein", "eine", "einen", "einem", "im", "in", "auf",
+            "vor", "noch", "denn", "mal", "bitte", "da", "dann", "programm", "plan",
+        }),
     ),
     reads=Reads(
         temperature=r"temperatur|\b(?:warm|kalt|heiß|heiss)\b",
@@ -127,6 +141,7 @@ LANGUAGE = Language(
             "read_climate": "{name} hat {current}, eingestellt auf {target}.",
             "read_weather": "{name}: {condition}, {temperature}.",
             "read_media": "{name} ist {state}: {playing}.",
+            "playback_not_started": "Die Wiedergabe auf {player} konnte nicht gestartet werden.",
         },
         media_labels={"media_title": "Titel", "media_artist": "Interpret", "media_album_name": "Album"},
         decimal_comma=True,

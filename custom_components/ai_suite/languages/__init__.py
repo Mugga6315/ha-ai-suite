@@ -35,7 +35,13 @@ def merged(part: Callable[[Language], Iterable[str]]) -> frozenset[str]:
 
 def language_of_tag(tag: str) -> Language:
     """The language of an HA language tag ("de-DE"); FALLBACK for one without a module."""
-    return LANGUAGES.get(tag.split("-", 1)[0].lower(), FALLBACK)
+    return LANGUAGES.get(module_code(tag) or "", FALLBACK)
+
+
+def module_code(tag: str | None) -> str | None:
+    """The code of the module for an HA language tag ("de-DE": "de"); None for none or one without a module."""
+    code = (tag or "").split("-", 1)[0].lower()
+    return code if code in LANGUAGES else None
 
 
 def ascii_spelling(text: str) -> str:

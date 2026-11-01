@@ -185,7 +185,7 @@ def command(
         return _play_request(form, devices, text, here)
     if form.action == READ and (reading := _quantity_read(form, devices, text, here, previous)) is not None:
         return reading
-    if (room_lights := _room_lights(form, devices, text)) is not None:
+    if (room_lights := _room_lights(form, devices, text, here)) is not None:
         return room_lights
     _one_light_named(form, devices, text)
     if form.device == NO_DEVICE:
@@ -245,7 +245,7 @@ def _quantity_read(
     return _unmeasured_in_home(devices, text)
 
 
-def _room_lights(form: Form, devices: dict[str, Candidate], text: str) -> Command | None:
+def _room_lights(form: Form, devices: dict[str, Candidate], text: str, here: str | None) -> Command | None:
     """Every light of the room, when the form or the text means them all; None otherwise."""
     if form.room_wide and not (form.device in devices and named_only_by(devices[form.device], devices, text)):
         if any(names(d, text) for d in devices.values() if d.domain == "light" and d.area == form.room):
@@ -253,7 +253,7 @@ def _room_lights(form: Form, devices: dict[str, Candidate], text: str) -> Comman
         if names_a_light_kind(text, devices):
             raise HandOff(f"all lights in {form.room}, but the text names a kind of light")
         return _room_command(form)
-    if _means_the_rooms_lights(form, devices, text):
+    if _means_the_rooms_lights(form, devices, text, here):
         return _room_command(form)
     return None
 
@@ -391,14 +391,19 @@ def _room_command(form: Form) -> Command:
     return Command(form.action, action.intent, group, _slots(action, group, form.value))
 
 
-def _means_the_rooms_lights(form: Form, devices: dict[str, Candidate], text: str) -> bool:
+def _means_the_rooms_lights(form: Form, devices: dict[str, Candidate], text: str, here: str | None) -> bool:
     """Whether a light request means every light of the room it names.
 
     It does when the room has several, and the text names no light and no kind of light, as HA's own sentences have it.
     The room's lights are those HA's area intent picks, by the registry's areas: a light without a room, or with the
-    room only in its name, is not one of them.
+    room only in its name, is not one of them. The room is the decider's, with a room word in the request or the
+    user's turn before (not checked to be a word for that room) and the decider sure of it at the run-off bar
+    (form.py, room_named and room_clear), or the satellite's own (`here`) when the user names no other, as in HA's own
+    satellite sentences.
     """
-    return (form.action in ROOM_ACTIONS and form.room not in (NO_ROOM, OTHER_ROOM)
+    stated = form.room_named and form.room_clear
+    own = here is not None and form.room == here and (form.room_clear or not form.room_named)
+    return (form.action in ROOM_ACTIONS and form.room not in (NO_ROOM, OTHER_ROOM) and (stated or own)
             and lights_in(devices, form.room) > 1 and LIGHT_WORDS.search(text) is not None
             and not any(names(d, text) for d in devices.values() if d.domain == "light")
             and not names_a_light_kind(text, devices))

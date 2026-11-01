@@ -294,7 +294,7 @@ class ConversationAgentEntity(conversation.ConversationEntity):
         """
         device = turn.devices.get(filled.device)
         kind = Platform.LIGHT if filled.room_wide else device.domain if device else None
-        if rule := turn.household.in_scope(filled.action, kind, filled.room != form.NO_ROOM):
+        if rule := turn.household.in_scope(filled.action, kind, filled.names_room):
             return follow(rule, text, language, filled)
         return filled
 

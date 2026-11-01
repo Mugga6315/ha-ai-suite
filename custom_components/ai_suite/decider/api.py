@@ -1,14 +1,13 @@
 """The decision server's client (`/v1/systemone`) and the answer model's (an OpenAI-compatible LLM)."""
 
 import asyncio
-import json
 import logging
 from typing import Any
 
 import aiohttp
 
 from ..const import TIMEOUT_SECONDS
-from ..llm_client import ChatClient, LLMError
+from ..llm_client import ChatClient, LLMError, json_of
 from ..monitor import recorder
 
 _LOGGER = logging.getLogger(__name__)
@@ -184,7 +183,7 @@ class LLMClient(ChatClient):
             response_format={"type": "json_schema", "json_schema": {"name": "split", "schema": schema}},
         )
         try:
-            parts = json.loads(text)["requests"]
+            parts = _requests_of(json_of(text))
         except (ValueError, KeyError, TypeError) as err:
             raise LLMError(f"unreadable split {text!r}") from err
         if not isinstance(parts, list) or not all(isinstance(part, str) and part.strip() for part in parts):
@@ -195,3 +194,11 @@ class LLMClient(ChatClient):
         """One answer of the model, thinking off where the server has the switch; `role`: answer or split."""
         with recorder.answer_step(role, self.model, self.url, system, user):
             return await self.complete(system, user, timeout=TIMEOUT_SECONDS, thinking=False, **params)
+
+
+def _requests_of(split: Any) -> Any:
+    """The parts of a split: the schema's object, or the bare array of the prompt's examples.
+
+    A server that ignores the schema (no structured output for that model) returns the array the examples show.
+    """
+    return split if isinstance(split, list) else split["requests"]

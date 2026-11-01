@@ -12,19 +12,24 @@ Built against the documented API; the URL, key and search limit are the
 calibration knobs to tune against a real server.
 """
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
+import ipaddress
 import logging
 from typing import Any
 
 import aiohttp
 import probatio
 
+from homeassistant.components import persistent_notification
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er, llm, selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util.hass_dict import HassKey
 
+from ..languages import language_of_tag
 from .spec import (
     READ_ONLY_REMOTE,
     RecordFailure,
@@ -68,21 +73,41 @@ FULL_LIMIT = 1000
 # Emby item type -> the API's IncludeItemTypes value.
 _TYPE_MAP = {"movie": "Movie", "series": "Series", "all": "Movie,Series"}
 
-# Wake polling: how long play_emby waits for a launched player to register its
-# Emby session, and the pause between polls. Kodi with the Emby add-on takes
-# several seconds to start; the timeout leaves margin without a long hang.
-WAKE_TIMEOUT_S = 15
-WAKE_POLL_S = 3
+# The background start of a launched player: how long it waits for the player's Emby session, and the pause between
+# reads. Kodi with the Emby add-on takes several seconds to start; play_emby has answered by then.
+WAKE_TIMEOUT_S = 20
+WAKE_POLL_S = 1
 
 # The Emby client play_emby assumes on Android TV: Kodi with the Emby add-on.
 # play_emby never plays through any other app — another app on the TV is a
 # separate concern from starting library playback.
 WAKE_DEFAULT_APP = "org.xbmc.kodi"
+# The word the app's Emby add-on puts in its sessions' Client ("Emby for Kodi Next Gen").
+WAKE_CLIENT = "kodi"
+# The ADB shell command that starts it. KEYCODE_WAKEUP wakes a sleeping device, which keeps the app off Emby, and
+# does nothing on an awake one. Then the androidtv library's own launch line (--pct-syskeys 0: monkey refuses to run
+# on a device without physical system keys otherwise). The library's launch (select_source) is not used: it first
+# reads the focused app from `dumpsys window`, and on Android versions it has no variant for (e.g. 15) that read
+# fails silently and nothing starts.
+WAKE_COMMAND = (
+    "input keyevent KEYCODE_WAKEUP; "
+    "monkey -p {app} -c android.intent.category.LEANBACK_LAUNCHER --pct-syskeys 0 1 >/dev/null 2>&1"
+)
 
+
+# The background jobs still running, by name: a new job under a name replaces the old one (Emby.run_in_background).
+_BACKGROUND_JOBS: HassKey[dict[str, asyncio.Task]] = HassKey("ai_suite_emby_background_jobs")
 
 # What a call to Emby can fail with: no answer, a slow one, an HTTP error, or a body that is no JSON or holds no
 # user (async_user_id).
 EMBY_ERRORS = (aiohttp.ClientError, TimeoutError, ValueError)
+
+# control_emby's commands as Emby's playstate commands, and the state the player then shows.
+_CONTROL = {"pause": "Pause", "resume": "Unpause", "stop": "Stop"}
+_STATE_AFTER = {"pause": "paused", "resume": "playing", "stop": "stopped"}
+# How often /Sessions is read for a command's state, and how far apart: a player gets 5 s to show it.
+CONTROL_READS = 10
+CONTROL_POLL_S = 0.5
 
 
 class EmbyClient:
@@ -226,7 +251,9 @@ class EmbyClient:
 
     async def async_next_up(self, series: str) -> list[dict]:
         """Next unwatched episodes — for one series if given, else across all."""
-        params = {"UserId": await self.async_user_id(), "Limit": SEARCH_LIMIT}
+        # Emby 4.6 merged next-up into continue watching: without LegacyNextUp a query over all series is empty.
+        # Jellyfin ignores the flag.
+        params = {"UserId": await self.async_user_id(), "Limit": SEARCH_LIMIT, "LegacyNextUp": "true"}
         if series:
             series_id = await self._find_series_id(series)
             if not series_id:
@@ -242,11 +269,18 @@ class EmbyClient:
 
     async def async_play(self, session_id: str, item_id: str) -> None:
         """Start the item on the session now."""
+        await self._post(f"/Sessions/{session_id}/Playing", {"ItemIds": item_id, "PlayCommand": "PlayNow"})
+
+    async def async_playstate(self, session_id: str, command: str) -> None:
+        """Send the session a playstate command (Pause, Unpause, Stop); Emby accepts it whether the player obeys."""
+        await self._post(f"/Sessions/{session_id}/Playing/{command}", {})
+
+    async def _post(self, path: str, params: dict) -> None:
         session = async_get_clientsession(self._hass)
         async with session.post(
-            f"{self._url}/Sessions/{session_id}/Playing",
+            f"{self._url}{path}",
             headers=self._headers(),
-            params={"ItemIds": item_id, "PlayCommand": "PlayNow"},
+            params=params,
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             resp.raise_for_status()
@@ -343,12 +377,21 @@ def _session_on_host(sessions: list[dict], host: str | None) -> dict | None:
     entity knows its device's ADB host. Same address = that device's player is
     already online, whatever name it reports.
     """
-    if not host:
+    if (address := _address(host)) is None:
         return None
     for s in _controllable(sessions):
-        if s.get("RemoteEndPoint") == host:
+        if _address(s.get("RemoteEndPoint")) == address:
             return s
     return None
+
+
+def _address(text: str | None) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """The IP address in `text`, an IPv4-mapped IPv6 one as IPv4; None for a name or nothing."""
+    try:
+        address = ipaddress.ip_address(text or "")
+    except ValueError:
+        return None
+    return getattr(address, "ipv4_mapped", None) or address
 
 
 def _entity_host(hass, entity_id: str) -> str | None:
@@ -361,41 +404,77 @@ def _entity_host(hass, entity_id: str) -> str | None:
     return config_entry.data.get("host") if config_entry else None
 
 
-async def _wake_and_wait(
-    hass, client: EmbyClient, entity_id: str, app: str, host: str | None = None
-) -> dict | None:
-    """Launch the player via the androidtv integration, then wait for its session.
-
-    The player's session is the one that *appears* after the launch — its name
-    (whatever the client reports) need not match the request wording — or the
-    one connecting from the device's `host`. Existing sessions are snapshotted
-    first; the first match within WAKE_TIMEOUT_S wins, None after that is the
-    honest failure the tool reports.
-    """
-    try:
-        before = {s.get("Id") for s in _controllable(await client.async_sessions())}
-    except EMBY_ERRORS:
-        before = set()
+async def _launch(hass: HomeAssistant, wake: Wake) -> None:
+    """Wake the device and start the app on it (WAKE_COMMAND) through the androidtv integration."""
     await hass.services.async_call(
-        "media_player",
-        "select_source",
-        {"entity_id": entity_id, "source": app},
+        "androidtv",
+        "adb_command",
+        {"entity_id": wake.entity_id, "command": WAKE_COMMAND.format(app=wake.app)},
         blocking=True,
     )
-    deadline = asyncio.get_event_loop().time() + WAKE_TIMEOUT_S
-    while asyncio.get_event_loop().time() < deadline:
+
+
+async def _connected(client: EmbyClient, wake: Wake, before: set[str]) -> dict | None:
+    """The launched player's session, read every WAKE_POLL_S for WAKE_TIMEOUT_S; None when it does not come.
+
+    It is the one connecting from the device's address. A host that is a name, or none, cannot be matched: the first
+    session that was not there before the launch is the player. Behind a proxy, Emby sees the proxy's address: when no
+    session comes from the device's own, the one new session of the launched app at the end of the wait is the player.
+    Another client opening Emby meanwhile is none of them.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + WAKE_TIMEOUT_S
+    fresh: list[dict] = []
+    while loop.time() < deadline:
         await asyncio.sleep(WAKE_POLL_S)
         try:
             sessions = await client.async_sessions()
         except EMBY_ERRORS:
             continue  # server hiccup mid-wait — keep polling until the deadline
-        on_host = _session_on_host(sessions, host)
-        if on_host:
+        if (on_host := _session_on_host(sessions, wake.host)) is not None:
             return on_host
         fresh = [s for s in _controllable(sessions) if s.get("Id") not in before]
-        if fresh:
+        if fresh and _address(wake.host) is None:
             return fresh[0]
-    return None
+    launched = [s for s in fresh if WAKE_CLIENT in (s.get("Client") or "").lower()]
+    return launched[0] if len(launched) == 1 else None
+
+
+async def _play_when_connected(
+    hass: HomeAssistant, client: EmbyClient, wake: Wake, item_id: str, before: set[str], context: llm.LLMContext | None
+) -> None:
+    """Start the item once the launched player connects; tell the user when it does not."""
+    try:
+        if (session := await _connected(client, wake, before)) is not None:
+            await client.async_play(session["Id"], item_id)
+            return
+        _LOGGER.warning("emby: %s did not connect to Emby within %s s", wake.entity_id, WAKE_TIMEOUT_S)
+    except EMBY_ERRORS as err:
+        _LOGGER.warning("emby: starting the item on %s failed: %s: %s", wake.entity_id, type(err).__name__, err)
+    language = language_of_tag(context.language if context and context.language else "")
+    await _tell(hass, context, language.replies.speech["playback_not_started"].format(player=wake.name))
+
+
+async def _tell(hass: HomeAssistant, context: llm.LLMContext | None, message: str) -> None:
+    """Say `message` on the satellite the request came from; a notification when it came from elsewhere."""
+    if (satellite := _satellite(hass, context.device_id if context else None)) is not None:
+        try:
+            await hass.services.async_call(
+                "assist_satellite", "announce", {"entity_id": satellite, "message": message}, blocking=True
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning("emby: announcing on %s failed: %s", satellite, err)
+        else:
+            return
+    persistent_notification.async_create(hass, message, title="AI Suite")
+
+
+def _satellite(hass: HomeAssistant, device_id: str | None) -> str | None:
+    """The Assist satellite entity of the device a request came from, or None."""
+    if device_id is None:
+        return None
+    entries = er.async_entries_for_device(er.async_get(hass), device_id)
+    return next((entry.entity_id for entry in entries if entry.domain == "assist_satellite"), None)
 
 
 def _filter_candidates(
@@ -467,6 +546,19 @@ class Emby:
 
     client: EmbyClient
     wake_entities: list[str] | None  # None: every androidtv player
+    # Runs a job past the tool call, owned by the config entry: the start of a launched player. A job under the name
+    # of one still running replaces it, so a second request for the same player wins.
+    run_in_background: Callable[[Coroutine[Any, Any, None], str], object]
+
+
+@dataclass(frozen=True, slots=True)
+class Wake:
+    """An Android TV player to start: its androidtv entity and name, the app, and the device's address if known."""
+
+    entity_id: str
+    name: str
+    app: str
+    host: str | None
 
 
 def _failed(tool: str, message: str) -> ToolError:
@@ -535,9 +627,64 @@ async def now_playing_emby(_hass: HomeAssistant, emby: Emby, _args: ToolArgs, _c
     lines = []
     for session in sessions:
         item = session.get("NowPlayingItem") or {}
-        state = "paused" if (session.get("PlayState") or {}).get("IsPaused") else "playing"
-        lines.append(f"- {_session_name(session)}: {_item_title(item)} [{item.get('Type', '')}] ({state})")
+        lines.append(f"- {_session_name(session)}: {_item_title(item)} [{item.get('Type', '')}] ({_play_state(session)})")
     return "Playing now:\n" + "\n".join(lines)
+
+
+async def control_emby(_hass: HomeAssistant, emby: Emby, args: ToolArgs, _context: llm.LLMContext) -> str:
+    """Pause, resume or stop what a player plays, once the player shows it."""
+    command = args["command"]
+    try:
+        target = _controlled_session(await emby.client.async_now_playing(), args.get("player", ""))
+        await emby.client.async_playstate(target["Id"], _CONTROL[command])
+        shown = await _shows(emby.client, target["Id"], _STATE_AFTER[command])
+    except aiohttp.ClientResponseError as err:
+        raise _failed("control_emby", f"Emby returned HTTP {err.status}") from err
+    except EMBY_ERRORS as err:
+        raise _failed("control_emby", f"Cannot reach Emby: {type(err).__name__}: {err}") from err
+    name = _session_name(target)
+    if not shown:
+        raise _failed("control_emby", f"Emby took the {command} command, but {name} does not show it: the player "
+                                      "may not obey remote control")
+    return f"{name}: {_STATE_AFTER[command]}."
+
+
+def _controlled_session(playing: list[dict], player: str) -> dict:
+    """The playing session the request means: the one `player` names, or the only one; a ToolError otherwise."""
+    controllable = _controllable(playing)
+    names = ", ".join(_session_name(s) for s in controllable) or "nothing"
+    if player:
+        if (session := _match_session(controllable, player)) is not None:
+            return session
+        raise _failed("control_emby", f"No playing Emby player matches '{player}'. Playing: {names}.")
+    if len(controllable) == 1:
+        return controllable[0]
+    if not controllable:
+        raise _failed("control_emby", "Nothing plays on an Emby player that can be controlled.")
+    raise _failed("control_emby", f"Several Emby players are playing: {names}. Name one.")
+
+
+async def _shows(client: EmbyClient, session_id: str, state: str) -> bool:
+    """Whether the session shows `state` within CONTROL_READS reads; a session gone has stopped.
+
+    A read that fails is skipped: the command was already taken, so a server hiccup is no reason to report it failed.
+    """
+    for _ in range(CONTROL_READS):
+        await asyncio.sleep(CONTROL_POLL_S)
+        try:
+            sessions = {s.get("Id"): s for s in await client.async_sessions()}
+        except EMBY_ERRORS:
+            continue
+        if _play_state(sessions.get(session_id, {})) == state:
+            return True
+    return False
+
+
+def _play_state(session: dict) -> str:
+    """What a session shows: playing, paused or stopped."""
+    if not session.get("NowPlayingItem"):
+        return "stopped"
+    return "paused" if (session.get("PlayState") or {}).get("IsPaused") else "playing"
 
 
 async def next_up_emby(_hass: HomeAssistant, emby: Emby, args: ToolArgs, _context: llm.LLMContext) -> str:
@@ -555,8 +702,12 @@ async def next_up_emby(_hass: HomeAssistant, emby: Emby, args: ToolArgs, _contex
     return f"Next up:\n{_format_items(items)}"
 
 
-async def play_emby(hass: HomeAssistant, emby: Emby, args: ToolArgs, _context: llm.LLMContext) -> str:
-    """Find the player, wake it when it is not connected, and start the item."""
+async def play_emby(hass: HomeAssistant, emby: Emby, args: ToolArgs, context: llm.LLMContext) -> str:
+    """Start the item on the player; a player that is not connected is started, and gets the item in the background.
+
+    The start takes several seconds, so the tool answers once the device is woken and the app launched: the user
+    hears at once that it is starting, and only a start that fails is told later (_play_when_connected).
+    """
     item_id = args["item_id"]
     player = args["player"]
     try:
@@ -564,50 +715,50 @@ async def play_emby(hass: HomeAssistant, emby: Emby, args: ToolArgs, _context: l
     except EMBY_ERRORS as err:
         raise _failed("play_emby", f"Cannot reach Emby: {type(err).__name__}: {err}") from err
 
-    # The androidtv players this play may wake — one registry walk, reused by both the wake attempt and the no-player
-    # hint below.
+    # The androidtv players this play may wake — one registry walk, reused by both the wake and the no-player hint.
     candidates = _filter_candidates(_wake_candidates(hass), emby.wake_entities)
     target = _match_session(sessions, player)
-    if target is None:
-        target = await _woken_session(hass, emby, sessions, candidates, player)
-    if target is None:
+    wake = None
+    if target is None and (wake := _wake(hass, candidates, player, emby.wake_entities)) is not None:
+        # Emby may already be online on that device under a name the request does not use: nothing to launch.
+        target = _session_on_host(sessions, wake.host)
+    if target is not None:
+        await _play(emby.client, target, item_id)
+        return f"Playing on {_session_name(target)}."
+    if wake is None:
         raise _failed("play_emby", _no_player(sessions, candidates, player))
     try:
-        await emby.client.async_play(target["Id"], item_id)
+        await _launch(hass, wake)
+    except HomeAssistantError as err:
+        raise _failed("play_emby", f"Starting '{wake.name}' failed: {type(err).__name__}: {err}") from err
+    before = {s["Id"] for s in _controllable(sessions)}
+    emby.run_in_background(
+        _play_when_connected(hass, emby.client, wake, item_id, before, context), f"ai_suite_emby_start {wake.entity_id}"
+    )
+    return (
+        f"{wake.name} is being started: the item plays as soon as its Emby player connects (within "
+        f"{WAKE_TIMEOUT_S} s). If it does not connect, the user is told then."
+    )
+
+
+async def _play(client: EmbyClient, session: dict, item_id: str) -> None:
+    try:
+        await client.async_play(session["Id"], item_id)
     except aiohttp.ClientResponseError as err:
         raise _failed("play_emby", f"Emby returned HTTP {err.status} starting playback") from err
     except EMBY_ERRORS as err:
         raise _failed("play_emby", f"Playback failed: {type(err).__name__}: {err}") from err
-    return f"Playing on {_session_name(target)}."
 
 
-async def _woken_session(
-    hass: HomeAssistant, emby: Emby, sessions: list[dict], candidates: dict[str, str], player: str
-) -> dict | None:
-    """The session of the Android TV player the request names, started when it is not connected yet.
-
-    None when no Android TV player fits the request; a ToolError when several fit or the start fails.
-    """
-    wake, wake_note = _wake_target(candidates, player, emby.wake_entities)
-    if wake is None:
-        if wake_note:
-            raise _failed("play_emby", wake_note)
-        return None
-    entity_id, app = wake
-    host = _entity_host(hass, entity_id)
-    # Emby may already be online on that device under a name the request does not use — then there is nothing to
-    # launch.
-    if (online := _session_on_host(sessions, host)) is not None:
-        return online
-    try:
-        target = await _wake_and_wait(hass, emby.client, entity_id, app, host)
-    except (*EMBY_ERRORS, HomeAssistantError) as err:
-        raise _failed("play_emby", f"Wake failed: {type(err).__name__}: {err}") from err
+def _wake(hass: HomeAssistant, candidates: dict[str, str], player: str, wake_entities: list[str] | None) -> Wake | None:
+    """The Android TV player the request names, to start; None when none fits, a ToolError when several do."""
+    target, note = _wake_target(candidates, player, wake_entities)
     if target is None:
-        raise _failed(
-            "play_emby", f"Launched '{entity_id}' but it never connected to Emby — is the device on and reachable?"
-        )
-    return target
+        if note:
+            raise _failed("play_emby", note)
+        return None
+    entity_id, app = target
+    return Wake(entity_id, candidates[entity_id] or entity_id, app, _entity_host(hass, entity_id))
 
 
 def _no_player(sessions: list[dict], candidates: dict[str, str], player: str) -> str:
@@ -742,8 +893,8 @@ SPECS: tuple[ToolSpec[Emby], ...] = (
             "and player — the name of the target player as shown in Emby, or the "
             "room/device name of its Android TV (e.g. 'Room 1', 'Player 1', "
             "'TV 1'); a partial name is enough. A player that is not connected yet "
-            "is started automatically by this tool: the Kodi app is launched on the "
-            "Android TV, so the first play may take a moment. Only Android TV (ADB) "
+            "is started by this tool: it wakes the Android TV and launches Kodi, then "
+            "answers at once, and the item starts as soon as the player connects. Only Android TV (ADB) "
             "players can be started — never try to start Emby through other media "
             "players such as receivers. If the player cannot be reached, the reply "
             "says so and names the players that can be started."
@@ -751,13 +902,27 @@ SPECS: tuple[ToolSpec[Emby], ...] = (
         parameters=probatio.Schema({probatio.Required("item_id"): str, probatio.Required("player"): str}),
         run=play_emby,
     ),
+    ToolSpec(
+        name="control_emby",
+        description=(
+            "Pause, resume or stop what an Emby player plays: command='pause', 'resume' or 'stop'. player: the "
+            "player's name as now_playing_emby shows it, a partial name is enough; leave it out when only one "
+            "player plays. The result says what the player then shows."
+        ),
+        parameters=probatio.Schema(
+            {probatio.Required("command"): probatio.In(list(_CONTROL)), probatio.Optional("player"): str}
+        ),
+        run=control_emby,
+    ),
 )
 
 
 # --- the tool set's subentry: its tools, form and check ------------------------
 
 
-def build(hass: HomeAssistant, data: Mapping[str, Any], record_failure: RecordFailure | None) -> list[llm.Tool]:
+def build(
+    hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any], record_failure: RecordFailure | None
+) -> list[llm.Tool]:
     """The Emby tools, built from the set's settings; none while the server is not set."""
     url = (data.get(CONF_EMBY_URL) or "").strip()
     api_key = (data.get(CONF_EMBY_API_KEY) or "").strip()
@@ -767,7 +932,17 @@ def build(hass: HomeAssistant, data: Mapping[str, Any], record_failure: RecordFa
     # restriction", not "no wake".
     raw_wake = data.get(CONF_WAKE_ENTITIES)
     wake_entities = [raw_wake] if isinstance(raw_wake, str) else (raw_wake or None)
-    return spec_tools(SPECS, Emby(EmbyClient(hass, url, api_key), wake_entities), record_failure)
+    def run_in_background(job: Coroutine[Any, Any, None], name: str) -> object:
+        running = hass.data.setdefault(_BACKGROUND_JOBS, {})
+        if (earlier := running.pop(name, None)) is not None:
+            earlier.cancel()
+        task = entry.async_create_background_task(hass, job, name)
+        if not task.done():
+            running[name] = task
+            task.add_done_callback(lambda done: running.pop(name) if running.get(name) is done else None)
+        return task
+
+    return spec_tools(SPECS, Emby(EmbyClient(hass, url, api_key), wake_entities, run_in_background), record_failure)
 
 
 def subentry_schema(data: dict) -> dict:

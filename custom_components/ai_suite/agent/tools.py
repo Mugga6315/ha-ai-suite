@@ -7,11 +7,16 @@ is wrapped to run under its own name and to name the integration that provides i
 """
 
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
+import json
+import logging
 import re
 from typing import Any
 
+import probatio
+
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import llm
 from homeassistant.util import dt as dt_util, slugify
 from homeassistant.util.json import JsonObjectType
@@ -19,6 +24,9 @@ from homeassistant.util.json import JsonObjectType
 from ..const import DOMAIN
 from ..monitor import recorder
 from ..tools.when import WEEKDAYS
+from .media import checked
+
+_LOGGER = logging.getLogger(__name__)
 
 # What a plain name holds: a model's tool-call parser may read anything else as an operator.
 _NOT_IN_A_NAME = re.compile(r"[^A-Za-z0-9_]")
@@ -71,8 +79,11 @@ def _date_line(tools: list[llm.Tool]) -> str:
 class WrappedTool(llm.Tool):
     """A tool under the name the model sees, tagged with the integration that provides it."""
 
-    def __init__(self, tool: llm.Tool, name: str) -> None:
-        """Take the tool's description and parameters as they are."""
+    def __init__(self, tool: llm.Tool, name: str, failed: dict[str, Exception] | None = None) -> None:
+        """Take the tool's description and parameters as they are.
+
+        `failed`: the turn's failed calls by `_signature` and the error each raised, shared by all its tools.
+        """
         self.name = name
         self.title = tool.title
         self.description = tool.description
@@ -81,37 +92,69 @@ class WrappedTool(llm.Tool):
         # The integration that provides the tool, not AI Suite: HA names it in its report of untagged tools.
         self.integration = tool.integration or _providing_domain(tool)
         self.tool = tool
+        self._failed = {} if failed is None else failed
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> llm.ToolResult | JsonObjectType:
         """Run the wrapped tool under its own name."""
-        own_input = llm.ToolInput(tool_name=self.tool.name, tool_args=tool_input.tool_args, id=tool_input.id)
         step = recorder.tool_opened(tool_input.id, self.name, tool_input.tool_args)
         try:
-            result = await self.tool.async_call(hass, own_input, llm_context)
+            result = await self._call_once(hass, tool_input, llm_context)
         except Exception as err:
             recorder.step_failed(step, err)
             raise
         recorder.tool_returned(step, result)
         return result
 
+    async def _call_once(
+        self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
+    ) -> llm.ToolResult | JsonObjectType:
+        """The tool's result; every failure a HomeAssistantError, and a failed call is not run again in the turn.
+
+        HA's chat log hands the model only a HomeAssistantError (or invalid arguments) as the tool's error; any other
+        exception ends the turn in silence, and what earlier tools did goes unreported. A model repeats a failed call
+        unchanged, so a slow tool's wait would come twice: the repeat gets the first call's error as it was, and the
+        model reads the same result as if it had run. A note that it was not run steers a model to other actions.
+        """
+        signature = _signature(self.name, tool_input.tool_args)
+        if (earlier := self._failed.get(signature)) is not None:
+            raise earlier
+        own_input = llm.ToolInput(tool_name=self.tool.name, tool_args=tool_input.tool_args, id=tool_input.id)
+        try:
+            return await self.tool.async_call(hass, own_input, llm_context)
+        except (HomeAssistantError, probatio.Invalid) as err:
+            self._failed[signature] = err
+            raise
+        except Exception as err:
+            # The model gets it as an error; the log keeps the traceback of what is likely a bug in the tool.
+            _LOGGER.warning("Tool %s failed", self.name, exc_info=err)
+            failure = HomeAssistantError(f"{type(err).__name__}: {err}")
+            self._failed[signature] = failure
+            raise failure from err
+
 
 def visible_tools(instances: list[llm.APIInstance]) -> list[WrappedTool]:
     """Every tool of the APIs under its plain name, without the standard ones ours replace.
 
     A name two tools would share would leave the model unable to tell them apart, so those get their API's id and
-    their full name instead.
+    their full name instead. The tools share one record of the turn's failed calls: the instances are built per turn.
+    HA's play tool is checked (media.py): it reports success whether the player plays or not.
     """
     offered = [(instance.api, tool) for instance in instances for tool in instance.tools]
     replaced = set().union(*(REPLACES.get(tool.name, set()) for _, tool in offered))
     kept = [(api, tool) for api, tool in offered if tool.name not in replaced]
     shared = {name for name, count in Counter(plain_name(tool.name) for _, tool in kept).items() if count > 1}
+    failed: dict[str, Exception] = {}
     return [
-        WrappedTool(tool, _readable(f"{slugify(api.id)}_{tool.name}") if name in shared else name)
+        WrappedTool(checked(tool), _readable(f"{slugify(api.id)}_{tool.name}") if name in shared else name, failed)
         for api, tool in kept
         for name in (plain_name(tool.name),)
     ]
+
+
+def _signature(name: str, args: Mapping[str, Any]) -> str:
+    return f"{name} {json.dumps(args, sort_keys=True, default=str)}"
 
 
 def plain_name(name: str) -> str:

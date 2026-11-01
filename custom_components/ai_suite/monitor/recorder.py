@@ -314,8 +314,8 @@ def conversation(trace: TurnTrace, conversation_id: str | None) -> None:
 
 
 @_hook
-def turn_output(trace: TurnTrace, speech: str, continue_conversation: bool) -> None:
-    """What the agent answered."""
+def turn_output(trace: TurnTrace, speech: str | None, continue_conversation: bool) -> None:
+    """What the agent answered; None: nothing was spoken."""
     trace.speech, trace.continue_conversation = speech, continue_conversation
 
 
@@ -483,7 +483,10 @@ def reply_checked(
 
 @_hook
 def retrying(trace: TurnTrace) -> None:
-    """The reply check asks for the reply again: the newest check retried, the rounds from now are retries."""
+    """The reply is asked for again (a fault the reply check found, or no text): the rounds from now are retries.
+
+    A reply check before it is marked retried.
+    """
     trace.round_role = "retry"
     checks = (step for step in reversed(trace.steps) if isinstance(step, ReplyCheckStep))
     if (check := next(checks, None)) is not None:

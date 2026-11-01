@@ -18,6 +18,7 @@ from typing import Any
 
 from homeassistant.components import conversation
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util.ulid import ulid_now
 
 from ..agent.settings import LoopSettings
@@ -100,20 +101,28 @@ def settings_text(decider: DeciderSettings, loop: LoopSettings | None, servers: 
 async def _answered(process: Process) -> conversation.ConversationResult:
     """The turn's result, its answer recorded; an exception is recorded as the turn's error and raised on.
 
-    HA speaks the error's text (conversation/agent_manager.py), so that is the turn's output. A cancelled turn (its
-    pipeline stopped) is an error too: its record must still name a path.
+    The turn's output is what HA speaks for the error (`_spoken`). A cancelled turn (its pipeline stopped) is an error
+    too: its record must still name a path.
     """
     try:
         result = await process()
     except BaseException as err:
         recorder.turn_path("error")
         recorder.turn_error("agent", err)
-        recorder.turn_output(str(err), False)
+        recorder.turn_output(_spoken(err), False)
         raise
     speech = result.response.speech.get("plain", {}).get("speech", "")
     recorder.turn_output(speech, result.continue_conversation)
     recorder.conversation(result.conversation_id)  # the last source: the chat session's id was given first
     return result
+
+
+def _spoken(err: BaseException) -> str | None:
+    """What HA speaks for the turn's error: a HomeAssistantError's text (conversation/agent_manager.py).
+
+    Any other error ends the voice run without speech ("intent-failed"); its text is in the turn's errors.
+    """
+    return str(err) if isinstance(err, HomeAssistantError) else None
 
 
 async def _close(monitor: Monitor, trace: TurnTrace, run: RunRef | None, settings: str) -> None:

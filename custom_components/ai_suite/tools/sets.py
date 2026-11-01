@@ -7,7 +7,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.config_entries import ConfigSubentryData, ConfigSubentryFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigSubentryData,
+    ConfigSubentryFlow,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
 
@@ -28,7 +32,7 @@ class ToolSet:
     """
 
     form: SettingsForm
-    build: Callable[[HomeAssistant, Mapping[str, Any], RecordFailure | None], list[llm.Tool]]
+    build: Callable[[HomeAssistant, ConfigEntry, Mapping[str, Any], RecordFailure | None], list[llm.Tool]]
     problem: Callable[[HomeAssistant, dict], Awaitable[str | None]] | None = None
     with_entry: bool = False
 

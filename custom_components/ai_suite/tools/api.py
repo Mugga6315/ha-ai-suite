@@ -39,7 +39,7 @@ class ToolsAPI(llm.API):
             if (tool_set := TOOL_SETS.get(subentry.subentry_type)) is None:
                 continue
             try:
-                tools += tool_set.build(self.hass, subentry.data, self._record_failure)
+                tools += tool_set.build(self.hass, self._entry, subentry.data, self._record_failure)
             except Exception:  # logged; another set's tools must survive a broken one
                 _LOGGER.exception("tool set %s failed to build its tools, skipping it this turn", subentry.title)
         return llm.APIInstance(api=self, api_prompt="", llm_context=llm_context, tools=tools)

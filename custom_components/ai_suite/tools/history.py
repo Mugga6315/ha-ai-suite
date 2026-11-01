@@ -23,6 +23,7 @@ import probatio
 
 from homeassistant.components import recorder
 from homeassistant.components.recorder import history, statistics
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm, selector
 from homeassistant.util import dt as dt_util
@@ -185,7 +186,9 @@ SPECS: tuple[ToolSpec[bool], ...] = (
 )
 
 
-def build(hass: HomeAssistant, data: Mapping[str, Any], record_failure: RecordFailure | None) -> list[llm.Tool]:
+def build(
+    hass: HomeAssistant, _entry: ConfigEntry, data: Mapping[str, Any], record_failure: RecordFailure | None
+) -> list[llm.Tool]:
     """The History tools; none while the recorder does not run."""
     if "recorder" not in hass.config.components:
         _LOGGER.warning("the recorder is not running: the History tools are off")

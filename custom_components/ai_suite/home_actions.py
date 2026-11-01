@@ -12,7 +12,7 @@ from typing import Any
 
 from homeassistant.components import conversation
 from homeassistant.components.recorder import get_instance, history
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er, intent
 from homeassistant.util import dt as dt_util
@@ -24,10 +24,15 @@ from .decider.calendar import (
     AHEAD_DAYS,
     BACK_DAYS,
     NO_EVENT,
+    NOTHING_AHEAD,
+    NOTHING_BACK,
     Event,
+    coming_next,
     day_facts,
+    entry_facts,
     event_fact,
     event_question,
+    last_ones,
     looks_back,
 )
 from .decider.changes import change_fact, last_change
@@ -48,6 +53,8 @@ from .decider.past import STATISTIC_TYPES, past_note
 from .decider.turn import HandOff, Timings, describe
 from .home import read_calendars, state_words, unavailable_reason
 from .monitor import recorder as monitor
+from .playback import async_started, names, now_playing, playback_of, unchanged
+from .volume import asked_by, async_volume_problem
 
 # Player states whose media attributes are what plays now; other states keep the last title.
 MEDIA_CURRENT = frozenset({"playing", "paused", "buffering"})
@@ -62,6 +69,8 @@ DAY = timedelta(days=1)
 CHANGES_READ = 1000
 CALENDAR_AHEAD = timedelta(days=AHEAD_DAYS)
 CALENDAR_BACK = timedelta(days=BACK_DAYS)
+# Media whose player shows an item inside it, not its name: a radio station's song on air, a playlist's track.
+_SHOWN_BY_ITEM = frozenset({"radio", "playlist"})
 
 # One choice question over the turn's state; the decider's sure answer, HandOff when it is unsure (form.ask_sure).
 Ask = Callable[[dict[str, Any]], Awaitable[str]]
@@ -107,7 +116,10 @@ class HomeActions:
         return await self._act(command)
 
     async def _act(self, command: decided.Command) -> intent.IntentResponse:
-        await self._handle_intent(command.intent, command.slots, describe(command.target))
+        response = await self._handle_intent(command.intent, command.slots, describe(command.target))
+        asked = asked_by(command.intent, command.slots)
+        if asked is not None and (problem := await async_volume_problem(self.hass, response.matched_states, asked)):
+            return self._note(f"{NOT_POSSIBLE}: {problem}")
         value = next((v for k, v in command.slots.items() if k not in ("name", "domain", "area")), None)
         target = command.target.label if isinstance(command.target, RoomGroup) else command.target.name
         return self._note(f"{DONE}: {command.action} {target}" + (f" {value}" if value else ""))
@@ -184,7 +196,10 @@ class HomeActions:
         return self._note(f"Forecast of {chosen.name}: {facts}")
 
     async def _calendar(self) -> intent.IntentResponse:
-        """The calendars' entries of the days the text names, or the one entry the decider picks (decider/calendar.py)."""
+        """The calendar facts the question asks for (decider/calendar.py).
+
+        The entries of the days the text names, the next or the last ones, or the one entry the decider picks.
+        """
         calendars = [c.entity_id for c in self.entities if c.domain == CALENDAR]
         if not calendars:
             raise HandOff("no calendar exposed")
@@ -198,18 +213,27 @@ class HomeActions:
             events = await self._calendar_events(calendars, first, dt_util.start_of_local_day(days[-1]) + DAY)
             facts = day_facts(events, days, now.date())
         else:
-            back = looks_back(text)
+            language = self.user_input.language
+            back = looks_back(text, language)
             start, end = (now - CALENDAR_BACK, now) if back else (now, now + CALENDAR_AHEAD)
             events = sorted(await self._calendar_events(calendars, start, end), key=_event_time, reverse=back)
-            question, by_summary = event_question(events, text)
-            choice = await self.ask(question)
-            if choice == NO_EVENT:
-                raise HandOff("no calendar entry fits")
-            facts = event_fact(by_summary[choice], now.date())
+            unnamed = last_ones(events, text, now) if back else coming_next(events, text)
+            if unnamed is not None:
+                facts = entry_facts(unnamed, now.date(), NOTHING_BACK if back else NOTHING_AHEAD)
+            else:
+                facts = event_fact(await self._event_asked(events, text), now.date())
         self.timings.mark("calendar")
         # Each fact carries its own date. Today's date beside it would be taken for the answer to a question when an
         # entry is: today instead of the entry's day.
         return self._note(f"Calendar: {facts}")
+
+    async def _event_asked(self, events: list[Event], text: str) -> Event:
+        """The one entry the decider picks as the one the text names; HandOff when none fits."""
+        question, by_summary = event_question(events, text)
+        choice = await self.ask(question)
+        if choice == NO_EVENT:
+            raise HandOff("no calendar entry fits")
+        return by_summary[choice]
 
     async def _calendar_events(self, calendars: list[str], start: datetime, end: datetime) -> list[Event]:
         """Every calendar's entries; HandOff when one fails, as an answer without its entries could be wrong."""
@@ -276,7 +300,8 @@ class HomeActions:
         """Music Assistant finds the media by name and plays it (music_assistant.play_media).
 
         Its action ignores other players without an error, so a player that is not Music Assistant's hands off first.
-        Not built: players outside Music Assistant, through HA's own HassMediaSearchAndPlay.
+        The note says what the player then plays (playback.py): the action returns before it does, and plays its
+        closest match for a name. Not built: players outside Music Assistant, through HA's own HassMediaSearchAndPlay.
         """
         player, media = playing.target, playing.media
         entry = er.async_get(self.hass).async_get(player.entity_id)
@@ -285,11 +310,18 @@ class HomeActions:
         if media.type is None:
             media = replace(media, type=await self._media_type_found(media, entry.config_entry_id))
         data = {"entity_id": player.entity_id, "media_id": media.name, "media_type": media.type}
+        before = playback_of(self.hass.states.get(player.entity_id))
         # Nothing plays on an error: the fallback agent can still try.
         await self._call(MUSIC_ASSISTANT, "play_media", data | ({"artist": media.artist} if media.artist else {}),
                          as_user=True)
+        if (started := await async_started(self.hass, player.entity_id, before)) is None:
+            return self._note(f"{NOT_POSSIBLE}: {player.name} did not start playing {media.name}")
+        if unchanged(started, before) and not _named(started, media):
+            return self._note(f"{NOT_POSSIBLE}: {player.name} still plays {now_playing(started) or 'what it played'}, "
+                              f"{media.name} did not start")
+        self.timings.mark("playing")
         by = f" by {media.artist}" if media.artist else ""
-        return self._note(f"{DONE}: play {media.type} {media.name}{by} on {player.name}")
+        return self._note(f"{DONE}: play {media.type} {media.name}{by} on {player.name}{_shown(started, media)}")
 
     async def _media_type_found(self, media: Media, music_assistant: str | None) -> str:
         """The media type the decider was unsure of, from Music Assistant's search.
@@ -313,8 +345,8 @@ class HomeActions:
                              media_current=state.state in MEDIA_CURRENT)
         return self._note(answer, answer=True)
 
-    async def _handle_intent(self, intent_type: str, slots: dict[str, Any], target: str) -> None:
-        """Run the HA intent; an intent HA refuses for the target hands off."""
+    async def _handle_intent(self, intent_type: str, slots: dict[str, Any], target: str) -> intent.IntentResponse:
+        """Run the HA intent, its response; an intent HA refuses for the target hands off."""
         user_input = self.user_input
         step = monitor.intent_opened(intent_type, slots, target)
         try:
@@ -327,6 +359,7 @@ class HomeActions:
             monitor.step_failed(step, err)
             raise HandOff(f"{intent_type} {target}: {err}") from err
         monitor.action_returned(step, response)
+        return response
 
     async def _call(self, domain: str, service: str, data: dict[str, Any], *, as_user: bool = False) -> Any:
         """An HA action with its response; HandOff when it fails.
@@ -357,3 +390,20 @@ class HomeActions:
 def _event_time(event: Event) -> datetime:
     """When an entry starts, an all-day one at the local midnight of its day."""
     return event.start if isinstance(event.start, datetime) else dt_util.start_of_local_day(event.start)
+
+
+def _shown(playing: State, media: Media) -> str:
+    """What the player shows for the note, and when it does not name the asked item, that it is another.
+
+    Music Assistant plays its closest match for a name, so a misheard name plays something else.
+    """
+    shown = now_playing(playing)
+    if not shown:
+        return ""
+    other = media.type not in _SHOWN_BY_ITEM and not names(playing, media.name)
+    return f"; it plays {shown}" + (f", not {media.name}" if other else "")
+
+
+def _named(playing: State, media: Media) -> bool:
+    """Whether what the player shows names the asked item; a radio station or playlist never does."""
+    return media.type not in _SHOWN_BY_ITEM and names(playing, media.name)

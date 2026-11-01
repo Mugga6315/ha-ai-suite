@@ -68,6 +68,14 @@ def previous_turn(text: str, answer: str) -> str:
     return f'the user said "{text}", the assistant answered "{answer.strip()}"'
 
 
+_PREVIOUS_USER = re.compile(r'the user said "(.*?)", the assistant answered', re.DOTALL)
+
+
+def previous_user_text(state: str) -> str:
+    """The user's words of the previous exchange in a state (`previous_turn`); empty on a first turn."""
+    return match.group(1) if (match := _PREVIOUS_USER.search(state)) else ""
+
+
 # Most candidates to hand the model in one pick; above this the server needs a two-round pick.
 MAX_ONE_ROUND = 16
 

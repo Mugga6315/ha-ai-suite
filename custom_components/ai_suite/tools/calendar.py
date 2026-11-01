@@ -12,6 +12,7 @@ from typing import Any
 
 import probatio
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir, llm
 from homeassistant.util import dt as dt_util
@@ -94,7 +95,9 @@ SPECS: tuple[ToolSpec[None], ...] = (
 )
 
 
-def build(_hass: HomeAssistant, _data: Mapping[str, Any], record_failure: RecordFailure | None) -> list[llm.Tool]:
+def build(
+    _hass: HomeAssistant, _entry: ConfigEntry, _data: Mapping[str, Any], record_failure: RecordFailure | None
+) -> list[llm.Tool]:
     """The Calendar tool. The set has no settings."""
     return spec_tools(SPECS, None, record_failure)
 

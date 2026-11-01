@@ -94,7 +94,7 @@ class ChatClient:
         """The answer read as a JSON object; a code fence around it is allowed."""
         text = await self.complete(system, user, **options)
         try:
-            value = json.loads(_CODE_FENCE.sub("", text.strip()))
+            value = json_of(text)
         except ValueError as err:
             raise LLMError(f"no JSON in the answer: {text[:200]!r}") from err
         if not isinstance(value, dict):
@@ -119,6 +119,11 @@ class ChatClient:
             raise LLMError(str(err) or type(err).__name__) from err
         recorder.llm_response(data)
         return _answer_text(data)
+
+
+def json_of(text: str) -> Any:
+    """The JSON value of a model's answer, a code fence around it allowed; ValueError when it holds none."""
+    return json.loads(_CODE_FENCE.sub("", text.strip()))
 
 
 def _droppable(body: dict[str, Any], rejected: set[str]) -> str | None:

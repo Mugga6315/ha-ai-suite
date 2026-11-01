@@ -73,6 +73,10 @@ async def message(
     if isinstance(content, conversation.ToolResultContent):
         return {"role": "tool", "tool_call_id": content.tool_call_id, "content": _result_text(content)}
     if isinstance(content, conversation.AssistantContent):
+        # A reply without text or tool calls (reasoning alone) says nothing; kept, it would put two assistant messages
+        # in a row, which several chat templates refuse.
+        if not (content.content or "").strip() and not content.tool_calls:
+            return None
         return _assistant_message(content, send_reasoning)
     if isinstance(content, conversation.UserContent) and content.content:
         return {"role": "user", "content": await _user_content(hass, content)}

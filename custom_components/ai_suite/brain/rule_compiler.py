@@ -112,11 +112,15 @@ SCHEMA = {
 }
 
 
-# Stored with the compiled rules: a change to the contract, the prompt or the schema
-# changes it, and rules compiled under another version are compiled again.
+# What a compiled rule must hold to be kept: the checks in this module (`checked`, `_shape_problem` and their helpers).
+# Raise it with a change there: no other part of the version would change, and rules a looser check kept would load
+# unchecked.
+CHECKS = 1
+# Stored with the compiled rules: a change to the contract, the prompt, the schema or the checks changes it, and rules
+# compiled under another version are compiled again.
 COMPILER_VERSION = hashlib.sha256(
     json.dumps(
-        [REQUEST_KINDS, DEVICE_KINDS, KINDS, MEDIA_TYPES, ACTIONS, LIMIT_SLOTS, SYSTEM, SCHEMA], sort_keys=True
+        [REQUEST_KINDS, DEVICE_KINDS, KINDS, MEDIA_TYPES, ACTIONS, LIMIT_SLOTS, SYSTEM, SCHEMA, CHECKS], sort_keys=True
     ).encode()
 ).hexdigest()[:12]
 
@@ -138,7 +142,48 @@ async def async_compile_rule(client: ChatClient, home: str, rule: str) -> dict:
         raise CompileError(f"{rule!r}: {err}") from err
     if compiled.get("kind") not in KINDS:
         raise CompileError(f"{rule!r}: no kind in {compiled!r}")
+    if problem := _shape_problem(compiled):
+        raise CompileError(f"{rule!r}: {problem} in {compiled!r}")
     return checked({"text": rule, **compiled})
+
+
+def _shape_problem(compiled: dict) -> str | None:
+    """Where the translation leaves SCHEMA's shape: a server without structured output lets the model choose it."""
+    names, triggers, scopes = (compiled.get(field) or [] for field in ("names", "triggers", "scopes"))
+    examples, effect = compiled.get("examples") or {}, compiled.get("effect")
+    if not all(isinstance(value, list) for value in (names, triggers, scopes)):
+        return "names, triggers or scopes that are no list"
+    if not all(isinstance(name, dict) and _texts([name.get("word"), name.get("means")]) for name in names):
+        return "a name without its word and meaning"
+    if not _texts(triggers):
+        return "a trigger that is no text"
+    if not all(isinstance(scope, dict) and isinstance(scope.get("request"), str) and scope["request"] in REQUEST_KINDS
+               and scope.get("device_kind") in DEVICE_KINDS for scope in scopes):
+        return "a scope outside the request and device kinds"
+    if effect is not None and not isinstance(effect, dict):
+        return "an effect that is no object"
+    if effect is not None and not _effect_shaped(effect):
+        return "an effect field of the wrong type"
+    if not isinstance(examples, dict) or not all(
+        isinstance(side, list) and _texts(side) for side in (examples.get(key) or [] for key in ("changed", "unchanged"))
+    ):
+        return "examples that are no lists of requests"
+    return None
+
+
+def _texts(values: list) -> bool:
+    return all(isinstance(value, str) for value in values)
+
+
+def _effect_shaped(effect: dict) -> bool:
+    """Whether the effect's names are texts or null and its limit an object with a text slot or null."""
+    limit = effect.get("limit")
+    fields = [effect.get(field) for field in ("media_type", "name", "action")]
+    if limit is not None:
+        if not isinstance(limit, dict):
+            return False
+        fields.append(limit.get("slot"))
+    return all(value is None or isinstance(value, str) for value in fields)
 
 
 def checked(compiled: dict) -> dict:
