@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "sensor": {
+      "timers": {
+        "default": "mdi:timer-outline"
+      }
+    }
+  }
+}

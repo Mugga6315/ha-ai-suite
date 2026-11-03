@@ -508,6 +508,16 @@
       "status": {
         "name": "Status"
       }
+    },
+    "sensor": {
+      "timers": {
+        "name": "Timers",
+        "state_attributes": {
+          "entries": {
+            "name": "Entries"
+          }
+        }
+      }
     }
   },
   "exceptions": {

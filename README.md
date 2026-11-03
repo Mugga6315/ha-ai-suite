@@ -107,7 +107,7 @@ Each agent is a conversation agent you can select in a voice assistant. Add as m
 | **Decision model** | The model on the decision server this agent uses. Empty: the server's only model. |
 | **Minimum confidence** | Default 0.5, from 0 to 1. How sure the decision model must be to act on its own. Higher: fewer wrong actions, more requests passed on. |
 | **Answer model** | Words the reply after the decision model acted, and splits requests with several commands. A small, fast model is enough. Empty: the text model. |
-| **Fallback agent** | Another conversation agent (for example a cloud assistant) that answers what the decision model passes on, in place of the text model. The decision model's own replies are still worded by the answer model. Used only while Decision model first is on. Empty: the text model. |
+| **Fallback agent** | Another conversation agent (for example a cloud assistant) that answers what the decision model passes on, in place of the text model. The decision model's own replies are still worded by the answer model. Used only while Decision model first is on. Empty: the text model. Commands for later ("turn off the light in 10 minutes") need the text model: only it can schedule them, and another agent may carry them out at once. |
 
 **Thinking**
 
@@ -143,6 +143,38 @@ not run again with the same arguments in the same request.
 | **Earlier exchanges kept** | How many earlier exchanges the model sees. 0: only the current request. Empty: all. |
 
 A reply without any text is asked for once more; empty again, the request fails with an error that is spoken.
+
+## Timers and commands for later
+
+AI Suite's text model starts timers and schedules commands, asked at a voice satellite or in a chat:
+
+- **Timers:** "Set a timer for 5 minutes", "a pasta timer for 8 minutes", "how long is left on the timer?", "cancel
+  the timer". When a timer ends, it is announced on the satellite it was set on. Set in a chat, or on a satellite that
+  is offline or cannot announce, it becomes a Home Assistant notification.
+- **Commands for later:** "turn off the TV in 30 minutes", "turn on the fan at 15:30", "turn on the fan for 10
+  minutes". The command runs at its time with the tool and arguments the model chose, without the model, as the user
+  who asked. If the call fails (the device or its tool is gone), that is said on the satellite it was asked on, else
+  it becomes a Home Assistant notification. A device that is only unavailable at that time is skipped by Home
+  Assistant without an error, so nothing is said.
+- Both survive a restart; one whose time passed while Home Assistant was down is dropped. They also run while AI
+  Suite waits for its LLM server to come up. Disabling AI Suite does not stop them until Home Assistant restarts;
+  removing it deletes them.
+- Every satellite sees the whole home's timers, each with the room it was set in: "cancel the timer" or "how long is
+  left?" means the one set on the satellite you speak to.
+- The **Timers** sensor counts what is running. Its `entries` attribute lists each one with `id`, `kind` (`timer` or
+  `command`), `name`, `started_at`, `ends_at`, `seconds`, `area`, and a command's `tool` and `arguments`: for a
+  dashboard or a wall display that counts down from `ends_at`.
+
+In AI Suite's agents these timers replace Home Assistant's built-in voice timers, so every timer shows in the sensor.
+A satellite's own timer display (an LED countdown) does not run for them. Two settings decide whether such a request
+reaches AI Suite at all:
+
+- **Prefer handling commands locally** (the voice assistant's settings in Home Assistant) must be **off**. When it is
+  on, Home Assistant answers its own timer sentences before AI Suite sees them: "Set a timer for 5 minutes", and also
+  commands for later such as "turn off the light in 10 minutes", which it runs as a built-in timer with a command.
+  Neither shows in the sensor, and AI Suite cannot list or cancel them.
+- A **Fallback agent** gets the requests the decision model passes on, timers and commands for later included, and
+  has none of AI Suite's tools for them.
 
 ## Tool sets
 

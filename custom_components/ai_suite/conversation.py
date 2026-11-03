@@ -335,7 +335,8 @@ class ConversationAgentEntity(conversation.ConversationEntity):
                 translation_placeholders={"entity_id": self.entity_id},
             )
         return await async_answer_turn(
-            self.hass, self._entry.runtime_data.llm, self._loop, self._agent_id, self.entity_id, user_input, language
+            self.hass, self._entry.runtime_data.llm, self._loop, self._agent_id, self.entity_id, user_input, language,
+            self._entry.runtime_data.schedule,
         )
 
     def _state(self, user_input: conversation.ConversationInput) -> str:

@@ -11,13 +11,13 @@ from collections.abc import Callable, Iterable, Mapping
 import json
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import probatio
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import llm
+from homeassistant.helpers import intent, llm
 from homeassistant.util import dt as dt_util, slugify
 from homeassistant.util.json import JsonObjectType
 
@@ -25,6 +25,9 @@ from ..const import DOMAIN
 from ..monitor import recorder
 from ..tools.when import WEEKDAYS
 from .media import checked
+
+if TYPE_CHECKING:  # schedule.py imports this module
+    from .schedule import Schedule
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,22 +41,43 @@ REPLACES = {
     # Every entry with its weekday; HA's gives ISO dates only, and a model that uses it alone names weekdays wrong.
     "get_calendar_events": {"calendar__get_events"},
 }
+# With the schedule, its timers replace Home Assistant's: those exist only on satellites that can ring and are seen by
+# nothing else (no entity, no event), the schedule's ring anywhere and show in its Timers sensor. So the agent gets
+# none of HA's timer tools, nor the line HA's prompts add on a device without them.
+HA_TIMER_TOOLS = frozenset({
+    intent.INTENT_START_TIMER, intent.INTENT_CANCEL_TIMER, intent.INTENT_CANCEL_ALL_TIMERS, intent.INTENT_TIMER_STATUS,
+    intent.INTENT_INCREASE_TIMER, intent.INTENT_DECREASE_TIMER, intent.INTENT_PAUSE_TIMER, intent.INTENT_UNPAUSE_TIMER,
+})
+NO_TIMERS_LINE = "This device is not able to start timers."
 
 
 class AgentAPI(llm.API):
     """The tools of one agent. Not registered: an agent hands it to its chat log itself."""
 
-    def __init__(self, hass: HomeAssistant, agent_id: str, sources: Iterable[str], hidden: Iterable[str] = ()) -> None:
-        """Merge the tools of `sources`, leaving out the `hidden` ones."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        agent_id: str,
+        sources: Iterable[str],
+        hidden: Iterable[str] = (),
+        schedule: Schedule | None = None,
+    ) -> None:
+        """Merge the tools of `sources`, leaving out the `hidden` ones; with `schedule`, add its tools."""
         super().__init__(hass=hass, id=f"{DOMAIN}.{agent_id}", name="AI Suite")
         self._sources = list(sources)
         self._hidden = set(hidden)
+        self._schedule = schedule
 
     async def async_get_api_instance(self, llm_context: llm.LLMContext) -> llm.APIInstance:
         """The merged tools and prompts for this request."""
         instances = [await llm.async_get_api(self.hass, api_id, llm_context) for api_id in self._sources]
-        tools: list[llm.Tool] = [tool for tool in visible_tools(instances) if tool.name not in self._hidden]
+        visible = [tool for tool in visible_tools(instances) if tool.name not in self._hidden]
         prompt = "\n\n".join(instance.api_prompt for instance in instances if instance.api_prompt)
+        tools: list[llm.Tool] = list(visible)
+        if self._schedule is not None:
+            visible = [tool for tool in visible if plain_name(tool.tool.name) not in HA_TIMER_TOOLS]
+            tools = [*visible, *self._schedule.tools(visible)]
+            prompt = "\n".join(line for line in prompt.split("\n") if line.strip() != NO_TIMERS_LINE)
         return llm.APIInstance(
             api=self,
             api_prompt="\n".join(part for part in (prompt, _date_line(tools)) if part),
@@ -79,10 +103,13 @@ def _date_line(tools: list[llm.Tool]) -> str:
 class WrappedTool(llm.Tool):
     """A tool under the name the model sees, tagged with the integration that provides it."""
 
-    def __init__(self, tool: llm.Tool, name: str, failed: dict[str, Exception] | None = None) -> None:
+    def __init__(
+        self, tool: llm.Tool, name: str, failed: dict[str, Exception] | None = None, api_id: str | None = None
+    ) -> None:
         """Take the tool's description and parameters as they are.
 
-        `failed`: the turn's failed calls by `_signature` and the error each raised, shared by all its tools.
+        `failed`: the turn's failed calls by `_signature` and the error each raised, shared by all its tools. `api_id`:
+        the LLM API that provides it; None for the agent's own tools (the schedule's).
         """
         self.name = name
         self.title = tool.title
@@ -92,6 +119,7 @@ class WrappedTool(llm.Tool):
         # The integration that provides the tool, not AI Suite: HA names it in its report of untagged tools.
         self.integration = tool.integration or _providing_domain(tool)
         self.tool = tool
+        self.api_id = api_id
         self._failed = {} if failed is None else failed
 
     async def async_call(
@@ -147,7 +175,8 @@ def visible_tools(instances: list[llm.APIInstance]) -> list[WrappedTool]:
     shared = {name for name, count in Counter(plain_name(tool.name) for _, tool in kept).items() if count > 1}
     failed: dict[str, Exception] = {}
     return [
-        WrappedTool(checked(tool), _readable(f"{slugify(api.id)}_{tool.name}") if name in shared else name, failed)
+        WrappedTool(checked(tool), _readable(f"{slugify(api.id)}_{tool.name}") if name in shared else name, failed,
+                    api_id=api.id)
         for api, tool in kept
         for name in (plain_name(tool.name),)
     ]

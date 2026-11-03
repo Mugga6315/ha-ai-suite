@@ -16,6 +16,7 @@ from ..const import AGENT_PLATFORM
 from ..monitor import recorder
 from . import reply_check
 from .loop import async_answer
+from .schedule import Schedule
 from .settings import LoopSettings
 from .tools import AgentAPI
 
@@ -30,15 +31,17 @@ async def async_answer_turn(
     entity_id: str,
     user_input: conversation.ConversationInput,
     language: str | None = None,
+    schedule: Schedule | None = None,
 ) -> conversation.ConversationResult:
     """The text model's answer to the turn.
 
     `agent_id`: the agent's subentry, which names its tools' API; `language`: the code of the reply language the decider
-    named, the reply check's second source after the user's own words.
+    named, the reply check's second source after the user's own words; `schedule`: where the agent's commands for later
+    go, its tools added to the agent's.
     """
     available = {api.id for api in llm.async_get_apis(hass)}
     sources = [api for api in settings.llm_apis if api in available]
-    tools = AgentAPI(hass, agent_id, sources, settings.hidden_tools) if sources else None
+    tools = AgentAPI(hass, agent_id, sources, settings.hidden_tools, schedule) if sources else None
     with (
         async_get_chat_session(hass, user_input.conversation_id) as session,
         conversation.async_get_chat_log(hass, session, user_input) as chat_log,

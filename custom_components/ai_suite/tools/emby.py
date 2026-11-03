@@ -21,7 +21,6 @@ from typing import Any
 import aiohttp
 import probatio
 
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -29,6 +28,7 @@ from homeassistant.helpers import entity_registry as er, llm, selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util.hass_dict import HassKey
 
+from ..announce import async_tell
 from ..languages import language_of_tag
 from .spec import (
     READ_ONLY_REMOTE,
@@ -457,24 +457,7 @@ async def _play_when_connected(
 
 async def _tell(hass: HomeAssistant, context: llm.LLMContext | None, message: str) -> None:
     """Say `message` on the satellite the request came from; a notification when it came from elsewhere."""
-    if (satellite := _satellite(hass, context.device_id if context else None)) is not None:
-        try:
-            await hass.services.async_call(
-                "assist_satellite", "announce", {"entity_id": satellite, "message": message}, blocking=True
-            )
-        except HomeAssistantError as err:
-            _LOGGER.warning("emby: announcing on %s failed: %s", satellite, err)
-        else:
-            return
-    persistent_notification.async_create(hass, message, title="AI Suite")
-
-
-def _satellite(hass: HomeAssistant, device_id: str | None) -> str | None:
-    """The Assist satellite entity of the device a request came from, or None."""
-    if device_id is None:
-        return None
-    entries = er.async_entries_for_device(er.async_get(hass), device_id)
-    return next((entry.entity_id for entry in entries if entry.domain == "assist_satellite"), None)
+    await async_tell(hass, context.device_id if context else None, message, title="AI Suite")
 
 
 def _filter_candidates(

@@ -50,7 +50,7 @@ from .agent.settings import (
     THINKING_OFF,
     THINKING_ON,
 )
-from .agent.tools import AgentAPI
+from .agent.tools import HA_TIMER_TOOLS, AgentAPI, plain_name
 from .brain import features
 from .brain.const import SUBENTRY_MEMORY
 from .brain.memory_flow import MemoryFlow
@@ -319,7 +319,9 @@ class ConversationAgentFlow(ConfigSubentryFlow):
         except Exception:  # any integration's API can raise anything here; the form must still open
             _LOGGER.warning("could not list the tools of %s", sources, exc_info=True)
             return hidden
-        return sorted({tool.name for tool in instance.tools} | set(hidden))
+        # HA's timer tools are never the agent's (agent/tools.py HA_TIMER_TOOLS): nothing to leave out.
+        offered = {tool.name for tool in instance.tools if plain_name(tool.name) not in HA_TIMER_TOOLS}
+        return sorted(offered | set(hidden))
 
 
 def _flatten(user_input: dict[str, Any]) -> dict[str, Any]:

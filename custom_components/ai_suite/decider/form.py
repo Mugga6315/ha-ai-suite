@@ -34,7 +34,7 @@ from .decision import (
 )
 from .domains import CHANGE_DOMAINS, READABLE, SWITCHED
 from .forecast import FORECAST, FORECAST_DESCRIPTION
-from .lists import LIST_STEP
+from .lists import LIST_ACTIONS, LIST_STEP
 from .locks import lock_direction
 from .media import LOOKUP_TYPES, Media, kind_question, named_in
 from .memory import REMEMBER, REMEMBER_DESCRIPTION
@@ -120,6 +120,22 @@ REQUESTS_QUESTION = {"type": "choice", "instructions": "How many separate things
     SEVERAL: "two or more things, each a device to change or a question to answer",
     ALL_BUT: "one change for a group of devices, except one or more of them",
 }}
+# Whether the request is meant for later: a command for later, or one about such commands, is the text model's, which
+# has the schedule's tools; the decision path would act now. Asked with REQUESTS_QUESTION, about the latest message;
+# the route's "none" says the same for a cancel or a list of them. A word list cannot cover every way to say a time in
+# every language. The question alone and the route's text alone each miss some commands for later, together they miss
+# far fewer; a time in a title or an aside then goes to the text model, only slower.
+NOW, FOR_LATER = "no", "yes"
+LATER_QUESTION = {
+    "type": "choice",
+    "instructions": "Does the user's message set a time, delay or duration for the action, or refer to an action "
+                    "planned for later?",
+    "criteria": {
+        NOW: "no: the action is meant now",
+        FOR_LATER: "yes: in 10 minutes, at 15:30, tonight, later, for an hour, or it cancels or lists something "
+                   "scheduled",
+    },
+}
 NO_ACTION = "none"
 NO_DEVICE = "none"
 NO_ROOM = "not mentioned"
@@ -141,6 +157,8 @@ CONTROL = "control"
 LIST = "list"
 # The routes whose request names a device, so the room picks among devices.
 _DEVICE_ROUTES = frozenset({CONTROL, READ, PLAY, PAST, CHANGED})
+# The routes that act: a command for later among them hands off. A list acts only where its entry changes (below).
+_ACTING_ROUTES = frozenset({CONTROL, PLAY})
 ROUTES = {
     CONTROL: "change a device: switch it on or off, dim it, open, close or stop a cover, set a temperature, lock or "
              "unlock a door, or control the music that plays (pause, resume, skip, volume, mute)",
@@ -154,7 +172,9 @@ ROUTES = {
     CHANGED: CHANGED_DESCRIPTION,
     REMEMBER: REMEMBER_DESCRIPTION,
     CHAT: CHAT_DESCRIPTION,
-    NO_ACTION: "anything else: a timer, a general question",
+    NO_ACTION: "anything else: a timer, a general question, or do something at a later time, after a delay or only "
+               "for a while (in 10 minutes, at 15:30, tonight, for an hour), or cancel or list something planned for "
+               "later",
 }
 
 # Words for a half in a percent slot.
@@ -230,12 +250,17 @@ async def decider_form(
         "room": {"type": "choice", "instructions": "Which room does the user name?", "criteria": _room_menu(areas)},
     }
     latest = state_text(text)
-    about_the_latest = {"requests": REQUESTS_QUESTION}
+    about_the_latest = {"requests": REQUESTS_QUESTION, "later": LATER_QUESTION}
     if latest == state:
         answers = await _ask(client, state, about_the_latest | first)
+        later = [answers]
     else:
-        asked, on_latest = await asyncio.gather(_ask(client, state, first), _ask(client, latest, about_the_latest))
+        # A follow-up's time may be in the turn before: "Light 2 auch" after "Mach das Licht in 10 Minuten aus".
+        asked, on_latest = await asyncio.gather(
+            _ask(client, state, first | {"later": LATER_QUESTION}), _ask(client, latest, about_the_latest)
+        )
         answers = asked | on_latest
+        later = [on_latest, asked]
     requests, p_requests = _answer(answers, "requests")
     if requests == ALL_BUT:
         raise HandOff("the request leaves a device out")
@@ -243,9 +268,13 @@ async def decider_form(
     # unsure of (a play of an album); a split needs a sure "several".
     if requests == SEVERAL and _passes("requests", p_requests, threshold):
         # Decided part by part once the message is split (the agent's several-request path); the whole message's
-        # route answers would fit none of them.
+        # route answers would fit none of them. A time for later holds for the whole message: a split may drop it. So
+        # a message of questions only with a time goes to the text model too, only slower.
+        _check_now(later, threshold)
         return Form(True, NO_ACTION, NO_ROOM, NO_DEVICE, None)
     route = await _route(client, state, answers, threshold)
+    if route in _ACTING_ROUTES:
+        _check_now(later, threshold)
     room, p = _answer(answers, "room")
     if room == OTHER_ROOM and route in _DEVICE_ROUTES and names_a_room(text, areas):
         # A room the menu lacks may be one of the home's in another language and misheard ("Schafzimmer" for
@@ -257,6 +286,8 @@ async def decider_form(
     change = await _change_asked(client, state, text, language, threshold) if route == CHANGED else None
     able = devices if change is None else {label: d for label, d in devices.items() if can_make(change, d)}
     action, device = await _route_answers(client, state, text, route, able, areas, sure_room, threshold)
+    if route == LIST and LIST_ACTIONS[action].intent is not None:  # "Was steht morgen auf der Liste?" changes nothing
+        _check_now(later, threshold)
     if _below("room", p, threshold):
         # An unsure room matters only where it picks the device: a question about an appointment is sure as a
         # calendar question, and its room does not matter.
@@ -493,6 +524,20 @@ def _room_menu(areas: dict[str, list[str]]) -> dict[str, str | None]:
     menu[NO_ROOM] = "the user names no room"
     menu[OTHER_ROOM] = "the user names a room that is not in this list"
     return menu
+
+
+def _check_now(later: list[dict[str, dict]], threshold: float) -> None:
+    """HandOff unless every answer to the later question is a sure "now".
+
+    Sure above the run-off bar, not the threshold: a wrong "now" acts at once.
+    """
+    bar = _run_off(threshold)
+    for answers in later:
+        choice, p = _answer(answers, "later")
+        if choice != NOW:
+            raise HandOff(f"a command for later: later {choice} p={p:.2f}")
+        if _below("later", p, bar):
+            raise HandOff(f"a command for later? {_unsure(f'later {choice}', p, bar)}")
 
 
 def _sure(answers: dict[str, dict], question: str, threshold: float) -> str:
