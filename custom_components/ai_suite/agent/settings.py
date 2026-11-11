@@ -41,12 +41,15 @@ class LoopSettings:
     send_reasoning: bool = True
     reply_check: bool = DEFAULT_REPLY_CHECK
     thinking_switch: bool = True  # the server takes chat_template_kwargs (llm_client.LLMServer)
+    cache_breakpoint: bool = False  # the server takes prompt cache breakpoints (llm_client.LLMServer)
 
     @classmethod
-    def from_subentry(cls, data: Mapping[str, Any], *, thinking_switch: bool = True) -> LoopSettings:
+    def from_subentry(
+        cls, data: Mapping[str, Any], *, thinking_switch: bool = True, cache_breakpoint: bool = False
+    ) -> LoopSettings:
         """The settings as the subentry stores them, with the defaults for what it leaves out.
 
-        `thinking_switch`: the LLM server's (LLMServer.thinking_switch).
+        `thinking_switch`, `cache_breakpoint`: the LLM server's (LLMServer).
         """
         budget = data.get(CONF_THINKING_BUDGET)
         history = data.get(CONF_MAX_HISTORY)
@@ -65,6 +68,7 @@ class LoopSettings:
             send_reasoning=data.get(CONF_SEND_REASONING, True),
             reply_check=data.get(CONF_REPLY_CHECK, DEFAULT_REPLY_CHECK),
             thinking_switch=thinking_switch,
+            cache_breakpoint=cache_breakpoint,
         )
 
     def server_fields(self) -> dict[str, Any]:

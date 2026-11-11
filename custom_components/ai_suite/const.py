@@ -9,6 +9,8 @@ CONF_DECIDER_MODEL = "decider_model"
 CONF_LLM_URL = "llm_url"  # an OpenAI-compatible server (vLLM, llama.cpp, llama-swap)
 # Off for servers that reject chat_template_kwargs (vLLM with --tokenizer-mode mistral answers 400).
 CONF_THINKING_OFF_KWARG = "thinking_off_kwarg"
+# On for servers that keep a marked start of the prompt for other conversations (OpenAI's prompt cache breakpoints).
+CONF_CACHE_BREAKPOINT = "cache_breakpoint"
 
 # A conversation subentry: one conversation agent.
 SUBENTRY_CONVERSATION = "conversation"
@@ -28,4 +30,5 @@ DEFAULT_THRESHOLD = 0.5
 # On: it removes made-up values without harming right replies; it costs one more round only on a flagged reply.
 DEFAULT_REPLY_CHECK = True
 DEFAULT_THINKING_OFF_KWARG = True
+DEFAULT_CACHE_BREAKPOINT = False  # a server that does not know the field may reject the request
 TIMEOUT_SECONDS = 8

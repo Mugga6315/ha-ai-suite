@@ -57,10 +57,11 @@ class Fault:
     text: str  # the fault, as a sentence for the model
 
 
-def turn_of(chat_log: conversation.ChatLog, user_text: str) -> Turn:
+def turn_of(chat_log: conversation.ChatLog, user_text: str, told: str | None = None) -> Turn:
     """The turn of `user_text` in the chat log, with the conversation before it.
 
-    A follow-up answers from earlier tool results too.
+    A follow-up answers from earlier tool results too. `told`: what the loop told the model with the request
+    (request.TurnNote); it counts as seen, not as the user's words.
     """
     content = list(chat_log.content)
     reply = content[-1].content or "" if content and content[-1].role == "assistant" else ""
@@ -70,7 +71,10 @@ def turn_of(chat_log: conversation.ChatLog, user_text: str) -> Turn:
     tools = {tool.name: tool for tool in chat_log.llm_api.tools} if chat_log.llm_api else {}
     called = [call.tool_name for c in content[start:] if c.role == "assistant" for call in c.tool_calls or []]
     acted = any(name not in tools or not tools[name].annotations.read_only for name in called)
-    return Turn(reply, [_message(c) for c in content if c.role != "system" or c.content], acted)
+    messages = [_message(c) for c in content if c.role != "system" or c.content]
+    if told:
+        messages.append({"role": "system", "content": told})
+    return Turn(reply, messages, acted)
 
 
 def faults(turn: Turn, language: str | None) -> list[Fault]:

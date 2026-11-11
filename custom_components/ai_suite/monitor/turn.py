@@ -23,9 +23,11 @@ from homeassistant.util.ulid import ulid_now
 
 from ..agent.settings import LoopSettings
 from ..const import (
+    CONF_CACHE_BREAKPOINT,
     CONF_DECIDER_URL,
     CONF_LLM_URL,
     CONF_THINKING_OFF_KWARG,
+    DEFAULT_CACHE_BREAKPOINT,
     DEFAULT_THINKING_OFF_KWARG,
 )
 from ..decider.settings import DeciderSettings
@@ -83,8 +85,9 @@ async def async_recorded_turn(
 def settings_text(decider: DeciderSettings, loop: LoopSettings | None, servers: Mapping[str, Any]) -> str:
     """An agent's settings as the record's settings blob: sorted JSON, without any key, token or password.
 
-    `servers`: the entry's data, of which the two server URLs (credentials in them removed) and the thinking switch
-    are taken. The agent's settings hold no secret: models, prompt, tool APIs, sampling, the decider's bar.
+    `servers`: the entry's data, of which the two server URLs (credentials in them removed), the thinking switch and
+    the prompt cache breakpoint are taken. The agent's settings hold no secret: models, prompt, tool APIs, sampling,
+    the decider's bar.
     """
     settings = {
         "decider": asdict(decider),
@@ -93,6 +96,7 @@ def settings_text(decider: DeciderSettings, loop: LoopSettings | None, servers: 
             CONF_DECIDER_URL: without_credentials(servers[CONF_DECIDER_URL]),
             CONF_LLM_URL: without_credentials(servers[CONF_LLM_URL]),
             CONF_THINKING_OFF_KWARG: servers.get(CONF_THINKING_OFF_KWARG, DEFAULT_THINKING_OFF_KWARG),
+            CONF_CACHE_BREAKPOINT: servers.get(CONF_CACHE_BREAKPOINT, DEFAULT_CACHE_BREAKPOINT),
         },
     }
     return json.dumps(settings, sort_keys=True, indent=2, ensure_ascii=False)

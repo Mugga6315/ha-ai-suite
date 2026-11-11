@@ -56,6 +56,7 @@ from .brain.const import SUBENTRY_MEMORY
 from .brain.memory_flow import MemoryFlow
 from .const import (
     CONF_ANSWER_MODEL,
+    CONF_CACHE_BREAKPOINT,
     CONF_DECIDER,
     CONF_DECIDER_MODEL,
     CONF_DECIDER_URL,
@@ -64,6 +65,7 @@ from .const import (
     CONF_REPLY_CHECK,
     CONF_THINKING_OFF_KWARG,
     CONF_THRESHOLD,
+    DEFAULT_CACHE_BREAKPOINT,
     DEFAULT_DECIDER,
     DEFAULT_REPLY_CHECK,
     DEFAULT_THINKING_OFF_KWARG,
@@ -339,6 +341,9 @@ def _server_schema(values: dict[str, Any]) -> probatio.Schema:
             probatio.Required(CONF_LLM_URL, default=values.get(CONF_LLM_URL, probatio.UNDEFINED)): TextSelector(),
             probatio.Required(
                 CONF_THINKING_OFF_KWARG, default=values.get(CONF_THINKING_OFF_KWARG, DEFAULT_THINKING_OFF_KWARG)
+            ): BooleanSelector(),
+            probatio.Required(
+                CONF_CACHE_BREAKPOINT, default=values.get(CONF_CACHE_BREAKPOINT, DEFAULT_CACHE_BREAKPOINT)
             ): BooleanSelector(),
         }
     )

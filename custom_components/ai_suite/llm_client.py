@@ -13,7 +13,13 @@ from typing import Any
 
 import aiohttp
 
-from .const import CONF_LLM_URL, CONF_THINKING_OFF_KWARG, DEFAULT_THINKING_OFF_KWARG
+from .const import (
+    CONF_CACHE_BREAKPOINT,
+    CONF_LLM_URL,
+    CONF_THINKING_OFF_KWARG,
+    DEFAULT_CACHE_BREAKPOINT,
+    DEFAULT_THINKING_OFF_KWARG,
+)
 from .monitor import recorder
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,15 +40,21 @@ class LLMServer:
     """An OpenAI-compatible server.
 
     `thinking_switch`: it takes `chat_template_kwargs` (vLLM with the Mistral tokenizer answers it with HTTP 400).
+    `cache_breakpoint`: it keeps the prompt up to OpenAI's prompt cache breakpoint for other conversations.
     """
 
     url: str
     thinking_switch: bool = True
+    cache_breakpoint: bool = False
 
     @classmethod
     def from_entry_data(cls, data: Mapping[str, Any]) -> LLMServer:
         """The LLM server of AI Suite's config entry."""
-        return cls(data[CONF_LLM_URL], data.get(CONF_THINKING_OFF_KWARG, DEFAULT_THINKING_OFF_KWARG))
+        return cls(
+            data[CONF_LLM_URL],
+            data.get(CONF_THINKING_OFF_KWARG, DEFAULT_THINKING_OFF_KWARG),
+            data.get(CONF_CACHE_BREAKPOINT, DEFAULT_CACHE_BREAKPOINT),
+        )
 
 
 class ChatClient:

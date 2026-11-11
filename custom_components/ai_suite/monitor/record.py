@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
-import re
 from typing import Any
 
 from homeassistant.util.ulid import ulid_at_time
 
+from ..agent import system_prompt
 from .built import AudioClip, Blob, BuiltTurn, VoicePart
 from .const import SCHEMA_VERSION
 from .recorder import (
@@ -33,9 +33,6 @@ from .recorder import (
 _NOT_PARAMS = frozenset({"model", "messages", "tools"})
 # The answer model's request body: model and messages are fields of their own.
 _NOT_ANSWER_PARAMS = frozenset({"model", "messages"})
-# HA's date and time line as rendered (helpers/llm.py DATE_TIME_PROMPT), with the "\n" HA joins the prompt's parts
-# with; found at the prompt's end when no API prompt locates it.
-_TIME_LINE = re.compile(r"\nCurrent time is \d{2}:\d{2}:\d{2}\. Today's date is \d{4}-\d{2}-\d{2}\.\n\Z")
 
 
 def build(
@@ -174,10 +171,12 @@ def _round(
 ) -> dict[str, Any]:
     call = step.call
     messages = call.get("messages", [])
-    system_ref, system_vars = None, {"time_line": None, "extra_prompt": None}
+    system_ref, time_line, extra = None, None, None
     if messages and messages[0].get("role") == "system":
-        stable, system_vars = _system_split(messages[0]["content"], trace.api_prompt, trace.extra_prompt)
+        prompt = _system_text(messages[0]["content"])
+        stable, time_line, extra = system_prompt.split(prompt, trace.api_prompt, trace.extra_prompt)
         system_ref = _blob(blobs, "system", stable)
+    system_vars = {"time_line": time_line, "extra_prompt": extra}
     tools = call.get("tools")
     reasoning, text, tool_calls = _said(step.contents)
     return {
@@ -200,30 +199,11 @@ def _round(
     }
 
 
-def _system_split(prompt: str, api_prompt: str | None, extra_prompt: str | None) -> tuple[str, dict[str, Any]]:
-    r"""The loop prompt's stable part, and its varying parts (system_vars).
-
-    HA joins `user_prompt \n api_prompt [\n time_line] [\n extra_prompt]` (conversation/chat_log.py); the time line
-    is left out when a GetDateTime tool exists. A part not found stays in the stable part: the blob then repeats less
-    often, the record is still whole.
-    """
-    extra = None
-    if extra_prompt and prompt.endswith("\n" + extra_prompt):
-        prompt, extra = prompt[: -len(extra_prompt) - 1], extra_prompt
-    stable, time_line = _time_split(prompt, api_prompt)
-    return stable, {"time_line": time_line, "extra_prompt": extra}
-
-
-def _time_split(prompt: str, api_prompt: str | None) -> tuple[str, str | None]:
-    if api_prompt:
-        if prompt.endswith(api_prompt):
-            return prompt, None
-        if (at := prompt.rfind(api_prompt + "\n")) >= 0:
-            end = at + len(api_prompt)
-            return prompt[:end], prompt[end + 1 :]
-    if found := _TIME_LINE.search(prompt):
-        return prompt[: found.start()], found.group()[1:]
-    return prompt, None
+def _system_text(content: str | list[dict[str, Any]]) -> str:
+    """The system prompt as one text: the loop sends it in parts when it marks it for the server's prompt cache."""
+    if isinstance(content, list):
+        return "".join(part["text"] for part in content)
+    return content
 
 
 def _new_messages(messages: list[dict[str, Any]], earlier: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

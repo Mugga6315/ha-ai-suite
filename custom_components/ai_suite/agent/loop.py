@@ -36,16 +36,18 @@ class LLMServerError(HomeAssistantError):
 
 
 async def async_answer(
-    client: openai.AsyncOpenAI, settings: LoopSettings, chat_log: conversation.ChatLog, agent_id: str
+    client: openai.AsyncOpenAI, settings: LoopSettings, chat_log: conversation.ChatLog, agent_id: str,
+    note: request.TurnNote | None,
 ) -> None:
     """Add the model's answer to the chat log.
 
     Each round is built from the chat log as it is then, so it holds the rounds before and anything added between (the
     reply check's retry request). The tools stay the same for the turn, so they are converted once, not per round.
+    `note`: what every round of the turn tells the model with the request.
     """
     tools = request.tool_specs(chat_log.llm_api)
     for round_number in range(1, MAX_ROUNDS + 1):
-        call = await request.build(settings, chat_log, tools)
+        call = await request.build(settings, chat_log, tools, note)
         if round_number == MAX_ROUNDS:
             _make_last_round(call)
         recorder.round_opened(call)
@@ -53,17 +55,17 @@ async def async_answer(
         if not chat_log.unresponded_tool_results:
             break
     if _empty_reply(chat_log):
-        await _answer_again(client, settings, chat_log, agent_id, tools)
+        await _answer_again(client, settings, chat_log, agent_id, tools, note)
 
 
 async def _answer_again(
     client: openai.AsyncOpenAI, settings: LoopSettings, chat_log: conversation.ChatLog, agent_id: str,
-    tools: list[dict[str, Any]],
+    tools: list[dict[str, Any]], note: request.TurnNote | None,
 ) -> None:
     """One more round without tools for a reply that held no text; LLMServerError when it is empty again."""
     _LOGGER.info("%s gave an empty reply, answering once more", agent_id)
     recorder.retrying()
-    call = await request.build(settings, chat_log, tools)
+    call = await request.build(settings, chat_log, tools, note)
     _ask_again(call)
     recorder.round_opened(call)
     await _run_round(client, call, settings, chat_log, agent_id)
@@ -83,10 +85,8 @@ def _ask_again(call: dict[str, Any]) -> None:
     newest = call["messages"][-1]
     if newest["role"] == "assistant":
         call["messages"].append({"role": "user", "content": EMPTY_REPLY_NOTE})
-    elif isinstance(newest["content"], list):  # a user message with images
-        newest["content"].append({"type": "text", "text": EMPTY_REPLY_NOTE})
     else:
-        newest["content"] = f"{newest['content']}\n\n{EMPTY_REPLY_NOTE}"
+        call["messages"][-1] = request.with_text(newest, EMPTY_REPLY_NOTE)
 
 
 def _empty_reply(chat_log: conversation.ChatLog) -> bool:

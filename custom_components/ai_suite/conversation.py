@@ -25,7 +25,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import AiSuiteConfigEntry
 from .agent.settings import LoopSettings
-from .agent.turn import async_answer_turn
+from .agent.turn import HandOffNote, async_answer_turn
 from .brain.llm_api import BrainAPI
 from .const import CONF_DECIDER_URL, DOMAIN, SUBENTRY_CONVERSATION
 from .decider import command as decided, form
@@ -90,7 +90,11 @@ class ConversationAgentEntity(conversation.ConversationEntity):
         self._text_model: str | None = subentry.data.get(CONF_MODEL)
         server = LLMServer.from_entry_data(entry.data)
         self._loop = (
-            LoopSettings.from_subentry(subentry.data, thinking_switch=server.thinking_switch) if self._text_model else None
+            LoopSettings.from_subentry(
+                subentry.data, thinking_switch=server.thinking_switch, cache_breakpoint=server.cache_breakpoint
+            )
+            if self._text_model
+            else None
         )
         # The loop streams its reply into the chat log; HA's pipeline starts TTS from it after 60 characters, before
         # a long reply has ended.
@@ -188,7 +192,7 @@ class ConversationAgentEntity(conversation.ConversationEntity):
     ) -> conversation.ConversationResult:
         """Write the decided turn into HA's shared chat log, so a later hand-off sees it."""
         with (
-            async_get_chat_session(self.hass, user_input.conversation_id) as session,
+            async_get_chat_session(self.hass, user_input.conversation_id, context=user_input.context) as session,
             conversation.async_get_chat_log(self.hass, session, user_input) as chat_log,
         ):
             recorder.conversation(session.conversation_id)
@@ -306,14 +310,14 @@ class ConversationAgentEntity(conversation.ConversationEntity):
     ) -> conversation.ConversationResult:
         """Hand the request to the fallback agent, or to the agent loop without one.
 
-        The fallback agent answers; told that a decider passed the request on and why, and the reply language
-        when the decider named it (HA's extra system prompt, added to one the request already has).
+        Whoever answers is told that a decider passed the request on and why, and the reply language when the
+        decider named it: the loop with the request, so its system prompt stays the same from turn to turn, a
+        fallback agent in the extra system prompt, added to one the request already has.
         """
-        reply_in = f"Reply in {LANGUAGE_NAMES[language]}." if language else None
-        note = HAND_OFF_NOTE.format(reason=reason)
-        extra = "\n".join(p for p in (user_input.extra_system_prompt, note, reply_in) if p)
+        hand_off = HandOffNote(HAND_OFF_NOTE.format(reason=reason), language)
         if self._decider.fallback_agent is None:
-            return await self._answer_with_loop(replace(user_input, extra_system_prompt=extra), language)
+            return await self._answer_with_loop(user_input, hand_off)
+        extra = "\n".join(p for p in (user_input.extra_system_prompt, hand_off.text, hand_off.reply_in) if p)
         return await conversation.async_converse(
             self.hass,
             user_input.text,
@@ -327,7 +331,7 @@ class ConversationAgentEntity(conversation.ConversationEntity):
         )
 
     async def _answer_with_loop(
-        self, user_input: conversation.ConversationInput, language: str | None = None
+        self, user_input: conversation.ConversationInput, hand_off: HandOffNote | None = None
     ) -> conversation.ConversationResult:
         if self._loop is None:
             raise HomeAssistantError(
@@ -335,8 +339,8 @@ class ConversationAgentEntity(conversation.ConversationEntity):
                 translation_placeholders={"entity_id": self.entity_id},
             )
         return await async_answer_turn(
-            self.hass, self._entry.runtime_data.llm, self._loop, self._agent_id, self.entity_id, user_input, language,
-            self._entry.runtime_data.schedule,
+            self.hass, self._entry.runtime_data.llm, self._loop, self._agent_id, self.entity_id, user_input,
+            schedule=self._entry.runtime_data.schedule, hand_off=hand_off,
         )
 
     def _state(self, user_input: conversation.ConversationInput) -> str:

@@ -4,6 +4,7 @@ Each round holds the chat log as chat-completions messages, the agent's tools an
 """
 
 import base64
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -16,29 +17,41 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import llm
 
+from . import system_prompt
 from .settings import LoopSettings
 
 _LOGGER = logging.getLogger(__name__)
 # Tool schemas are plain JSON Schema objects to the servers; these keywords at the top are not accepted there.
 _UNSUPPORTED_TOP_KEYS = ("allOf", "anyOf", "oneOf")
+# OpenAI's mark on a content part: the server may keep the prompt up to it for other conversations.
+_CACHE_BREAKPOINT = {"prompt_cache_breakpoint": {"mode": "explicit"}}
 
 
 class AttachmentError(HomeAssistantError):
     """The user attached something the model cannot be sent."""
 
 
+@dataclass(frozen=True, slots=True)
+class TurnNote:
+    """What the model is told about one turn: added to the request's message in that turn's rounds only."""
+
+    asked: conversation.UserContent  # the chat log's entry of the turn's request
+    text: str
+
+
 async def build(
-    settings: LoopSettings, chat_log: conversation.ChatLog, tools: list[dict[str, Any]]
+    settings: LoopSettings, chat_log: conversation.ChatLog, tools: list[dict[str, Any]], note: TurnNote | None = None
 ) -> dict[str, Any]:
     """The keyword arguments of one chat-completions call, built from the chat log as it is now.
 
-    `tools`: the turn's tools as function definitions (tool_specs).
+    `tools`: the turn's tools as function definitions (tool_specs); `note`: the turn's note for the model.
     """
+    chat = recent(await messages(chat_log.hass, chat_log.content, settings.send_reasoning, note), settings.max_history)
+    if settings.cache_breakpoint:
+        chat = _system_prompt_marked(chat, chat_log)
     request: dict[str, Any] = {
         "model": settings.model,
-        "messages": recent(
-            await messages(chat_log.hass, chat_log.content, settings.send_reasoning), settings.max_history
-        ),
+        "messages": chat,
         "parallel_tool_calls": settings.parallel_tool_calls,
         # Token counts in the stream's last chunk, for servers and proxies that report them.
         "stream_options": {"include_usage": True},
@@ -56,11 +69,49 @@ async def build(
 
 
 async def messages(
-    hass: HomeAssistant, contents: list[conversation.Content], send_reasoning: bool
+    hass: HomeAssistant, contents: list[conversation.Content], send_reasoning: bool, note: TurnNote | None
 ) -> list[dict[str, Any]]:
-    """The chat log's entries as chat messages, in order; an entry the API has no message for is left out."""
-    converted = [await message(hass, content, send_reasoning) for content in contents]
-    return [entry for entry in converted if entry is not None]
+    """The chat log's entries as chat messages, in order; an entry the API has no message for is left out.
+
+    `note` is added in brackets to the message of its request.
+    """
+    chat = []
+    for content in contents:
+        entry = await message(hass, content, send_reasoning)
+        if entry is None:
+            continue
+        chat.append(with_text(entry, f"[{note.text}]") if note is not None and content is note.asked else entry)
+    return chat
+
+
+def with_text(entry: dict[str, Any], text: str) -> dict[str, Any]:
+    """The message with `text` added after its content.
+
+    A system prompt in parts reads as one text, so the added part opens with the blank line a single text gets.
+    """
+    content = entry["content"]
+    if not isinstance(content, list):
+        return {**entry, "content": f"{content}\n\n{text}"}
+    opening = "\n\n" if entry["role"] == "system" else ""
+    return {**entry, "content": [*content, {"type": "text", "text": f"{opening}{text}"}]}
+
+
+def _system_prompt_marked(chat: list[dict[str, Any]], chat_log: conversation.ChatLog) -> list[dict[str, Any]]:
+    """The chat with its system prompt in two parts, the first marked for the server's prompt cache.
+
+    The second part holds what a turn changes (system_prompt.split); the parts joined are the prompt as it was.
+    """
+    if not chat or chat[0]["role"] != "system":
+        return chat
+    prompt: str = chat[0]["content"]
+    api_prompt = chat_log.llm_api.api_prompt if chat_log.llm_api else None
+    stable = system_prompt.split(prompt, api_prompt, chat_log.extra_system_prompt).stable
+    if not stable:
+        return chat
+    parts = [{"type": "text", "text": stable, **_CACHE_BREAKPOINT}]
+    if varying := prompt[len(stable) :]:
+        parts.append({"type": "text", "text": varying})
+    return [{"role": "system", "content": parts}, *chat[1:]]
 
 
 async def message(

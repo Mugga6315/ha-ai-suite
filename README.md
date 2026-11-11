@@ -52,7 +52,7 @@ A play or a volume change counts as done only when the player shows it.
 
 ## Requirements
 
-- Home Assistant 2026.10.0 or newer.
+- Home Assistant 2026.11.0 or newer.
 - A **decision server** with the `/v1/systemone` decision API, for example llama.cpp's `llama-server` with a
   decision model.
 - An **OpenAI-compatible LLM server** for the text models, for example vLLM or llama.cpp's `llama-server`.
@@ -88,6 +88,7 @@ when both answer.
 | **Decision server URL** | Base URL of the decision server, without a path. The agents pick their decision model from it. |
 | **LLM server URL** | OpenAI-compatible server, URL ending in `/v1`. It runs the text models and Second Brain's background jobs. |
 | **Switch thinking per request (enable_thinking)** | Default on. AI Suite sends `enable_thinking` in `chat_template_kwargs`: the answer model and the rule compiler run without thinking, the background jobs with it, and each agent's **Thinking** setting applies. Off: for a server that rejects the field; no request sends it then. |
+| **Mark the prompt for the server's prompt cache** | Default off. On: the text model's requests send the system prompt in parts, and the part before what a turn changes carries OpenAI's `prompt_cache_breakpoint`. For a server that keeps a marked start of the prompt for other conversations: the tools and the system prompt are then read once, not in every turn, for as long as they render the same. A new day starts a new one, and so does a change in what the agent's Instructions render (a template for the time or a state). A server that reuses a shared start of the prompt by itself does not need it. Leave off for a server that rejects the field. |
 
 ### Conversation agent
 

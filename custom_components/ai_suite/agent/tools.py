@@ -122,6 +122,10 @@ class WrappedTool(llm.Tool):
         self.api_id = api_id
         self._failed = {} if failed is None else failed
 
+    def forget_failed(self) -> None:
+        """Let every call run again: the record of failed calls is one turn's."""
+        self._failed.clear()
+
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> llm.ToolResult | JsonObjectType:
@@ -166,7 +170,7 @@ def visible_tools(instances: list[llm.APIInstance]) -> list[WrappedTool]:
     """Every tool of the APIs under its plain name, without the standard ones ours replace.
 
     A name two tools would share would leave the model unable to tell them apart, so those get their API's id and
-    their full name instead. The tools share one record of the turn's failed calls: the instances are built per turn.
+    their full name instead. The tools share one record of the turn's failed calls (forget_failed_calls).
     HA's play tool is checked (media.py): it reports success whether the player plays or not.
     """
     offered = [(instance.api, tool) for instance in instances for tool in instance.tools]
@@ -180,6 +184,13 @@ def visible_tools(instances: list[llm.APIInstance]) -> list[WrappedTool]:
         for api, tool in kept
         for name in (plain_name(tool.name),)
     ]
+
+
+def forget_failed_calls(instance: llm.APIInstance) -> None:
+    """Start a turn without the failed calls of the turns before: HA keeps an agent's tools for a conversation."""
+    for tool in instance.tools:
+        if isinstance(tool, WrappedTool):
+            tool.forget_failed()
 
 
 def _signature(name: str, args: Mapping[str, Any]) -> str:

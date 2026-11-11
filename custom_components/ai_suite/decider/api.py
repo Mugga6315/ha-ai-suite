@@ -137,8 +137,8 @@ SPLIT_SYSTEM_PROMPT = (
 MAX_PARTS = 4
 SPLIT_MAX_TOKENS = 300
 
-# Added to the fallback agent's own prompt on a hand-off (HA's extra system prompt): the fallback knows a decider
-# exists and why the request reached it.
+# What the agent that answers a hand-off is told: that a decider exists and why the request reached it. The loop
+# reads it with the request, a fallback agent in its own prompt (HA's extra system prompt).
 HAND_OFF_NOTE = (
     'A decision model read this request first and passed it to you (its reason: "{reason}"). Handle the whole '
     "request yourself, with your tools as usual. Do not mention the decision model to the user."

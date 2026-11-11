@@ -6,12 +6,14 @@
         "data": {
           "decider_url": "Decision server URL",
           "llm_url": "LLM server URL",
-          "thinking_off_kwarg": "Switch thinking per request (enable_thinking)"
+          "thinking_off_kwarg": "Switch thinking per request (enable_thinking)",
+          "cache_breakpoint": "Mark the prompt for the server's prompt cache"
         },
         "data_description": {
           "decider_url": "The decision server for every agent's decision model. Base URL, without a path.",
           "llm_url": "An OpenAI-compatible server, URL ending in /v1. Runs the agents' models and Second Brain's background jobs.",
-          "thinking_off_kwarg": "The answer model and the rule compiler then run without thinking, the background jobs with it. Turn off if the server rejects this field."
+          "thinking_off_kwarg": "The answer model and the rule compiler then run without thinking, the background jobs with it. Turn off if the server rejects this field.",
+          "cache_breakpoint": "For a server that keeps a marked start of the prompt for other conversations (prompt cache breakpoints, as in OpenAI's API). An agent's tools and system prompt are then read once, not in every turn. Leave off if the server rejects this field."
         }
       },
       "reconfigure": {
@@ -19,12 +21,14 @@
         "data": {
           "decider_url": "Decision server URL",
           "llm_url": "LLM server URL",
-          "thinking_off_kwarg": "Switch thinking per request (enable_thinking)"
+          "thinking_off_kwarg": "Switch thinking per request (enable_thinking)",
+          "cache_breakpoint": "Mark the prompt for the server's prompt cache"
         },
         "data_description": {
           "decider_url": "The decision server for every agent's decision model. Base URL, without a path.",
           "llm_url": "An OpenAI-compatible server, URL ending in /v1. Runs the agents' models and Second Brain's background jobs.",
-          "thinking_off_kwarg": "The answer model and the rule compiler then run without thinking, the background jobs with it. Turn off if the server rejects this field."
+          "thinking_off_kwarg": "The answer model and the rule compiler then run without thinking, the background jobs with it. Turn off if the server rejects this field.",
+          "cache_breakpoint": "For a server that keeps a marked start of the prompt for other conversations (prompt cache breakpoints, as in OpenAI's API). An agent's tools and system prompt are then read once, not in every turn. Leave off if the server rejects this field."
         }
       }
     },
