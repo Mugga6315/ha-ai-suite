@@ -1,7 +1,4 @@
-"""AI Suite: one integration for the home's voice assistant.
-
-A decision model in front of an LLM agent, AI Suite's own tools, and Second Brain's memory.
-"""
+"""AI Suite: a decision model in front of an LLM agent, AI Suite's own tools, and Second Brain's memory."""
 
 from dataclasses import dataclass
 from typing import Any, cast
@@ -56,8 +53,7 @@ type AiSuiteConfigEntry = ConfigEntry[RuntimeData]
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register the actions and load the home's timers and commands, whether or not an entry is loaded.
 
-    The actions say why they cannot run without one. The schedule runs without one: a timer rings while the entry
-    waits for its LLM server.
+    The schedule runs without one: a timer rings while the entry waits for its LLM server.
     """
     async_setup_services(hass)
     await async_setup_schedule(hass)
@@ -67,8 +63,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: AiSuiteConfigEntry) -> bool:
     """Set up the clients, memory, the tools, the trace monitor's exporter and the platforms; lend it the schedule.
 
-    Only the LLM server is checked: without it no turn can be answered. A decision server that is down costs
-    nothing but speed, since every turn then goes to the text model.
+    Raises ConfigEntryNotReady while the LLM server does not answer; a decision server that is down costs only speed.
     """
     try:
         await list_models(async_get_clientsession(hass), entry.data[CONF_LLM_URL])
@@ -91,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AiSuiteConfigEntry) -> b
         llm=client, schedule=schedule, brain=brain, monitor=await async_setup_monitor(hass, entry)
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    # A changed server, an added, changed or removed subentry, or changed options reload the entry.
+    # Any change to the servers, the subentries or the options reloads the entry.
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
@@ -109,7 +104,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: AiSuiteConfigEntry) -> 
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: AiSuiteConfigEntry, device: dr.DeviceEntry
 ) -> bool:
-    """A device whose subentry is gone (a removed agent, tool set or feature) may be deleted.
+    """A device whose subentry is gone may be deleted.
 
     A live subentry's device stays, and so does the entry's own (its Timers sensor).
     """

@@ -1,12 +1,4 @@
-"""The household's rules as Second Brain compiles them for a decider (its rule_compiler).
-
-The decider cannot read rules, so each rule comes as fields code uses. A request rule hands the request to the text
-model, which has the rule in its prompt: by words in the request ("triggers") or by the kind of request the form names
-("scopes"). Names are aliases; answer rules go to the model that words decided replies. Given as text to every decider
-question, rules send requests astray: an alias rule pulls a request for another room to the room it names. A request
-rule with an effect in the decider's terms (rule_compiler.py's fields) is followed by code instead: `follow`. No HA
-imports.
-"""
+"""The household's rules as Second Brain compiles them for a decider (its rule_compiler)."""
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -24,15 +16,14 @@ ANY_DEVICE = "any"
 _EFFECT_FIELDS = frozenset({"media_type", "name", "action", "limit"})
 _LIMIT_FIELDS = frozenset({"slot", "min", "max"})
 _VALUE_SLOTS = frozenset(action.value_slot for action in ACTIONS.values() if action.value_slot)
-# A negation turns any command around, and trigger words cannot exclude it: an action a rule sets hands off where the
-# text negates, or where its language has no word list (closed word sets for what is security-relevant, in the
-# languages with a module: languages/). A wrong hit only hands off.
 # Which way an action turns a device. A rule's action replaces only one of its own way ("close" → "lock"), never the
 # other ("unlock" → "lock": a rule triggered by a door's name would lock the door for a request to unlock it).
 _DIRECTION = {
     **dict.fromkeys(("turn_on", "open", "unlock", "resume", "unmute", "volume_up"), "on"),
     **dict.fromkeys(("turn_off", "close", "lock", "pause", "stop", "mute", "volume_down"), "off"),
 }
+# A negation turns any command around, and trigger words cannot exclude it: an action a rule sets hands off where the
+# text negates, or where its language has no word list.
 _NEGATION = pattern(lambda language: language.requests.negation)
 
 
@@ -147,9 +138,8 @@ def _rule(raw: dict[str, Any]) -> Rule:
 def follow(rule: Rule, text: str, language: str | None, filled: Form) -> Form:
     """The form with the rule's effect in place of the decider's answers.
 
-    HandOff when the rule has no effect, or its effect does not fit the request: the text model, which has the rule,
-    answers then. An action the rule sets counts as the text's lock words: a request to close a door names no
-    locking, the household means it. `language`: the reply language the decider named (None: unknown).
+    HandOff when the rule has no effect, or its effect does not fit the request. `language`: the reply language the
+    decider named (None: unknown).
     """
     effect = rule.effect
     if effect is None:
@@ -158,7 +148,7 @@ def follow(rule: Rule, text: str, language: str | None, filled: Form) -> Form:
         if filled.action != PLAY or filled.media is None:
             raise HandOff(f"a household rule's media type, the request plays nothing: {rule.text}")
         # Only for the name the rule is about: its trigger also fires on a title by the artist the rule names, and
-        # the name cut from the text can be wrong (an artist named in the possessive); then the text model decides.
+        # the name cut from the text can be wrong.
         if filled.media.name.casefold() != (effect.name or "").casefold():
             raise HandOff(f"a household rule's media name, the request plays something else: {rule.text}")
         filled = replace(filled, media=replace(filled.media, type=effect.media_type, candidates=()))
@@ -176,11 +166,7 @@ def follow(rule: Rule, text: str, language: str | None, filled: Form) -> Form:
 
 
 def _same_way(ruled: str, decided: str, text: str) -> bool:
-    """Whether the rule's action goes the way the request does.
-
-    The request's way is the decider's action, or the text's own lock words, which win over it (a decider may lock the
-    door for a German unlock command whose verb is split).
-    """
+    """Whether the rule's action goes the way of the decider's action, or of the text's lock words, which win."""
     said = lock_action(text)
     if said is not None and ruled in LOCK_ACTIONS and said != ruled:
         return False

@@ -1,8 +1,6 @@
-"""The agent loop: the text model answers in rounds.
+"""The agent loop: the text model answers in rounds until a round ends without tool calls.
 
-A round's tool calls run in HA's chat log, and the next round reads their results, until a round ends without tool
-calls. A turn that ends without a reply that has text is asked once more, without tools; still empty, it fails
-with an error HA speaks instead of ending in silence.
+A turn without a reply text is asked once more, without tools; still empty, it raises LLMServerError.
 """
 
 import logging
@@ -41,8 +39,6 @@ async def async_answer(
 ) -> None:
     """Add the model's answer to the chat log.
 
-    Each round is built from the chat log as it is then, so it holds the rounds before and anything added between (the
-    reply check's retry request). The tools stay the same for the turn, so they are converted once, not per round.
     `note`: what every round of the turn tells the model with the request.
     """
     tools = request.tool_specs(chat_log.llm_api)
@@ -76,13 +72,10 @@ async def _answer_again(
 
 
 def _ask_again(call: dict[str, Any]) -> None:
-    """Make the request one without tools that tells the model its reply was empty.
-
-    The note joins the newest message, a user message or tool result: several chat templates refuse two user messages
-    in a row. After an earlier reply (a request without text leaves one newest) it is a user message of its own.
-    """
+    """Make the request one without tools that tells the model its reply was empty."""
     call["tool_choice"] = "none"
     newest = call["messages"][-1]
+    # Joined to a newest user message or tool result: several chat templates refuse two user messages in a row.
     if newest["role"] == "assistant":
         call["messages"].append({"role": "user", "content": EMPTY_REPLY_NOTE})
     else:
@@ -90,11 +83,7 @@ def _ask_again(call: dict[str, Any]) -> None:
 
 
 def _empty_reply(chat_log: conversation.ChatLog) -> bool:
-    """Whether the turn ends without a reply that has text.
-
-    A round that streamed nothing adds no reply (HA then fails the turn with "Unable to get response"); one with
-    reasoning only, or with emojis only that the loop strips, adds a reply without text, which HA speaks as silence.
-    """
+    """Whether the turn ends without a reply that has text."""
     last = chat_log.content[-1]
     return last.role != "assistant" or (not last.tool_calls and not (last.content or "").strip())
 

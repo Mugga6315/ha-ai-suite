@@ -1,13 +1,6 @@
 """Commands for later and timers: what runs at a set time without the model.
 
-For "turn off the TV in 30 minutes" the model calls schedule_command with the tool it would call now, that tool's
-arguments and the time. The call is checked against the tool at once and stored with the LLM API that provides the
-tool; at the time the same tool of that API runs with the same arguments, the request's language and its device. The
-APIs are Home Assistant's, the home's: no agent is asked. A timer ("Stell einen Timer auf 5 Minuten") is an entry that
-rings where it was set (ring.py). A command that fails at its time is told the same way: on the satellite it was asked
-on, else as a notification. A command runs as the user who asked for it. Stored entries survive a restart. One whose
-time passed while Home Assistant was down is dropped: nobody asked for it late. Listeners (the Timers sensor) hear of
-every change.
+Entries survive a restart; one whose time passed while Home Assistant was down is dropped: nobody asked for it late.
 """
 
 from collections.abc import Callable, Mapping
@@ -39,7 +32,7 @@ from ..languages import language_of_tag
 from ..tools.spec import READ_ONLY, SpecTool, ToolArgs, ToolError, ToolSpec
 from ..tools.when import WEEKDAYS
 from .ring import async_ring
-from .tools import WrappedTool, visible_tools
+from .tools import WrappedTool, lists_unquoted, visible_tools
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,9 +46,8 @@ CANCEL_TOOL = "cancel_timer_or_command"
 COMMAND, TIMER = "command", "timer"
 
 _CLOCK_TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
-# A call the model repeats (in the same round or the next) is no second command: the same tool, arguments and time as
-# asked, for about the same time. Rounds are seconds apart, so their in_seconds times differ by that much. "Off in 10 s,
-# on in 20 s, off in 30 s" asks two different times for the same call: two commands.
+# A call the model repeats (in the same round or the next) is no second command: same call and asked time, run times
+# this close, as rounds are seconds apart and their in_seconds times differ by that much.
 SAME_TIME = timedelta(seconds=30)
 # The longest delay a timer or command may have, in seconds or as a time.
 MAX_DELAY = timedelta(days=366)
@@ -63,26 +55,21 @@ MAX_DELAY = timedelta(days=366)
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ScheduledEntry:
-    """One entry of the schedule: a tool call for later (kind COMMAND), or a timer that rings (kind TIMER).
-
-    `asked`: the time as the model gave it ("in_seconds=600", "at=15:30"). A command's `tool`: its name as the model saw
-    it (for the list); `api_id`, `api_tool`: the LLM API that provides it and its name there, by which it is called. A
-    timer has its `name` (may be empty) and no tool. `user_id`: who asked; a command runs as them.
-    """
+    """One entry of the schedule: a tool call for later (kind COMMAND), or a timer that rings (kind TIMER)."""
 
     id: str
     kind: str
     created: datetime  # UTC
     run_at: datetime  # UTC
-    asked: str
-    name: str = ""
-    tool: str = ""
-    api_id: str = ""
-    api_tool: str = ""
+    asked: str  # the time as the model gave it: "in_seconds=600", "at=15:30"
+    name: str = ""  # a timer's name, may be empty
+    tool: str = ""  # a command's tool, by the name the model saw (for the list)
+    api_id: str = ""  # the LLM API that provides the tool
+    api_tool: str = ""  # the tool's name in that API, by which it is called
     arguments: Mapping[str, Any]
     language: str | None
     device_id: str | None
-    user_id: str | None
+    user_id: str | None  # who asked; a command runs as them
 
     def as_stored(self) -> dict[str, Any]:
         """The entry as the storage file holds it."""
@@ -119,8 +106,7 @@ def _aware(text: str) -> datetime:
 class Schedule:
     """The home's timers and commands for later: stored, each armed for its time, run when it comes.
 
-    It belongs to the integration, not to its entry: an entry whose setup waits for its LLM server must not keep a
-    timer from ringing or a command from running.
+    It belongs to the integration, not its entry: an entry waiting for its LLM server must not keep a timer from ringing.
     """
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -134,7 +120,7 @@ class Schedule:
     async def async_load(self) -> None:
         """Arm the stored entries still ahead; drop those whose time passed while Home Assistant was down.
 
-        An entry that cannot be read (a hand edit) is dropped with a warning: it must not keep the entry from loading.
+        An entry that cannot be read (a hand edit) is dropped with a warning, so it does not fail the setup.
         """
         stored = (await self._store.async_load() or {}).get("entries", [])
         now = dt_util.utcnow()
@@ -159,8 +145,7 @@ class Schedule:
     def async_unload(self) -> None:
         """Disarm every entry and keep it; the stored entries are armed again at the next load.
 
-        Kept, so that one added or cancelled afterwards (a turn still running while Home Assistant stops) is saved with
-        the rest.
+        Kept, so that one added or cancelled afterwards (a turn still running at the stop) is saved with the rest.
         """
         for disarm in self._disarm.values():
             disarm()
@@ -191,10 +176,7 @@ class Schedule:
         return sorted(self._entries.values(), key=lambda entry: entry.run_at)
 
     def scheduled_like(self, entry: ScheduledEntry) -> ScheduledEntry | None:
-        """An entry already scheduled with the same call and asked time, from the same device, for about the same time.
-
-        The same timer asked on two satellites is two timers: each rings in its own room.
-        """
+        """An entry already scheduled with the same call and asked time, from the same device, for about the same time."""
         return next((pending for pending in self._entries.values()
                      if _same_call(pending) == _same_call(entry)
                      and abs(pending.run_at - entry.run_at) <= SAME_TIME), None)
@@ -321,7 +303,8 @@ async def schedule_command(hass: HomeAssistant, scheduling: Scheduling, args: To
     tool = scheduling.tools.get(args["tool"])
     if tool is None:
         raise ToolError(f"There is no tool '{args['tool']}'. Give the name of one of your tools.")
-    arguments = args.get("arguments") or {}
+    # Checked and stored as the call will run, so a repeat that writes a list as text is still the same call.
+    arguments = lists_unquoted(tool.parameters, args.get("arguments") or {})
     try:
         tool.parameters(arguments)
     except probatio.Invalid as err:
@@ -354,11 +337,7 @@ async def start_timer(_hass: HomeAssistant, scheduling: Scheduling, args: ToolAr
 async def list_timers_and_commands(
     hass: HomeAssistant, scheduling: Scheduling, _args: ToolArgs, context: llm.LLMContext
 ) -> str:
-    """Every timer and command for later, the next one first, with the time left and where it was set.
-
-    The schedule holds the whole home's timers: "cancel the timer" in the kitchen means the kitchen's, so each line
-    says whether it was set on the device asking ("here") or in which room.
-    """
+    """Every timer and command for later, the next one first, with the time left and where it was set."""
     pending = scheduling.schedule.pending()
     if not pending:
         return "No timers are running and no commands are scheduled."
@@ -382,6 +361,7 @@ def _user_id(context: llm.LLMContext) -> str | None:
 
 def _same_call(entry: ScheduledEntry) -> tuple:
     """What two entries share when one repeats the other."""
+    # The device counts: the same timer asked on two satellites is two timers, each ringing in its own room.
     return (entry.kind, entry.name, entry.api_id, entry.api_tool, entry.arguments, entry.asked, entry.device_id)
 
 
@@ -400,10 +380,7 @@ def _listed(command: ScheduledEntry) -> str:
 
 
 def _where(hass: HomeAssistant, entry: ScheduledEntry, asking_device: str | None) -> str:
-    """Where the entry was set, as the asking device sees it.
-
-    "set here (Location 1)", "set in Location 2", "set in a chat".
-    """
+    """Where the entry was set, as the asking device sees it."""
     if entry.device_id is None:
         return "set in a chat"
     area = satellite_area(hass, entry.device_id)
@@ -468,7 +445,6 @@ def _arguments(command: ScheduledEntry) -> str:
     return json.dumps(dict(command.arguments), ensure_ascii=False, sort_keys=True)
 
 
-# The time of an entry, as schedule_command and start_timer take it.
 _IN_SECONDS = probatio.All(probatio.Coerce(int), probatio.Range(min=1, max=int(MAX_DELAY.total_seconds())))
 _AT_DESCRIPTION = "Local time HH:MM, the next time it comes; YYYY-MM-DDTHH:MM for another day"
 

@@ -1,16 +1,4 @@
-"""Emby: list the Emby (or Jellyfin) library and start playback on a player, waking an Android TV player if needed.
-
-Design note: this talks to the Emby server's own REST API, which Jellyfin shares
-(Jellyfin forked Emby 3.5.2), so the same two calls drive either server:
-
-- **List / search** — ``GET /Items?SearchTerm=…&IncludeItemTypes=Movie,Series
-  &Recursive=true``. Returns library items regardless of which player is on.
-- **Play** — pick a controllable session from ``GET /Sessions`` by name, then
-  ``POST /Sessions/{Id}/Playing?ItemIds=…&PlayCommand=PlayNow``.
-
-Built against the documented API; the URL, key and search limit are the
-calibration knobs to tune against a real server.
-"""
+"""Emby: list the Emby (or Jellyfin) library and start playback on a player, waking an Android TV player if needed."""
 import asyncio
 from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
@@ -39,21 +27,18 @@ from .spec import (
     spec_tools,
 )
 
-# --- the set's settings --------------------------------------------------------
 CONF_EMBY_URL = "emby_url"
 CONF_EMBY_API_KEY = "emby_api_key"
 CONF_WAKE_ENTITIES = "wake_entities"
 
 _LOGGER = logging.getLogger(__name__)
 
-# status -> Emby playstate filter. Playstate is per-user, resolved automatically.
 _STATUS_FILTER = {
     "unwatched": "IsUnplayed",
     "watched": "IsPlayed",
     "in_progress": "IsResumable",
 }
-# recent kind -> (playstate filter or None, sort field), per Emby's "Browsing
-# the Library" wiki; "watching" is in the order of Kodi's resume row.
+# (playstate filter, sort field) per Emby's "Browsing the Library" wiki; "watching" sorts like Kodi's resume row.
 _RECENT = {
     "watching": ("IsResumable", "DatePlayed"),
     "played": ("IsPlayed", "DatePlayed"),
@@ -63,32 +48,23 @@ _RECENT = {
 # What is resumable per item_type: a series is never started, its episodes are.
 _RESUME_TYPE_MAP = {"movie": "Movie", "series": "Episode", "all": "Movie,Episode"}
 
-# Default page for a list — plenty for an overview without flooding the
-# prompt. full=true raises it to FULL_LIMIT.
+# Items per list: enough for an overview without flooding the prompt.
 SEARCH_LIMIT = 25
-# hard ceiling on the full=true dump so one request can't blow the
-# model's context on a huge library. Raise it if a real library needs more.
+# Ceiling for full=true, so one request cannot blow the model's context on a huge library.
 FULL_LIMIT = 1000
 
-# Emby item type -> the API's IncludeItemTypes value.
 _TYPE_MAP = {"movie": "Movie", "series": "Series", "all": "Movie,Series"}
 
-# The background start of a launched player: how long it waits for the player's Emby session, and the pause between
-# reads. Kodi with the Emby add-on takes several seconds to start; play_emby has answered by then.
+# How long a launched player gets to show its Emby session, and the pause between reads: Kodi's add-on takes seconds.
 WAKE_TIMEOUT_S = 20
 WAKE_POLL_S = 1
 
-# The Emby client play_emby assumes on Android TV: Kodi with the Emby add-on.
-# play_emby never plays through any other app — another app on the TV is a
-# separate concern from starting library playback.
+# The Emby client on Android TV: Kodi with the Emby add-on. play_emby starts no other app.
 WAKE_DEFAULT_APP = "org.xbmc.kodi"
 # The word the app's Emby add-on puts in its sessions' Client ("Emby for Kodi Next Gen").
 WAKE_CLIENT = "kodi"
-# The ADB shell command that starts it. KEYCODE_WAKEUP wakes a sleeping device, which keeps the app off Emby, and
-# does nothing on an awake one. Then the androidtv library's own launch line (--pct-syskeys 0: monkey refuses to run
-# on a device without physical system keys otherwise). The library's launch (select_source) is not used: it first
-# reads the focused app from `dumpsys window`, and on Android versions it has no variant for (e.g. 15) that read
-# fails silently and nothing starts.
+# KEYCODE_WAKEUP: a sleeping device keeps the app off Emby. Not the library's select_source: its focused-app read
+# fails silently on Android versions it has no variant for (e.g. 15), and nothing starts.
 WAKE_COMMAND = (
     "input keyevent KEYCODE_WAKEUP; "
     "monkey -p {app} -c android.intent.category.LEANBACK_LAUNCHER --pct-syskeys 0 1 >/dev/null 2>&1"
@@ -98,14 +74,12 @@ WAKE_COMMAND = (
 # The background jobs still running, by name: a new job under a name replaces the old one (Emby.run_in_background).
 _BACKGROUND_JOBS: HassKey[dict[str, asyncio.Task]] = HassKey("ai_suite_emby_background_jobs")
 
-# What a call to Emby can fail with: no answer, a slow one, an HTTP error, or a body that is no JSON or holds no
-# user (async_user_id).
+# ValueError: a body that is no JSON, or holds no user (async_user_id).
 EMBY_ERRORS = (aiohttp.ClientError, TimeoutError, ValueError)
 
-# control_emby's commands as Emby's playstate commands, and the state the player then shows.
 _CONTROL = {"pause": "Pause", "resume": "Unpause", "stop": "Stop"}
 _STATE_AFTER = {"pause": "paused", "resume": "playing", "stop": "stopped"}
-# How often /Sessions is read for a command's state, and how far apart: a player gets 5 s to show it.
+# Reads of /Sessions and the seconds between them: a player gets 5 s to show a command's state.
 CONTROL_READS = 10
 CONTROL_POLL_S = 0.5
 
@@ -128,9 +102,7 @@ class EmbyClient:
     async def async_user_id(self) -> str:
         """The Emby user id, for the per-user playstate calls (cached).
 
-        Playstate (watched, resume, recently played) is per-user. A single Emby
-        user is assumed, so the first user the server reports is it — no
-        username config needed. Raises if the server reports no users.
+        Assumes a single Emby user: the first the server reports. Raises ValueError when it reports none.
         """
         if self._user_id:
             return self._user_id
@@ -162,7 +134,7 @@ class EmbyClient:
             return await resp.json()
 
     def _library_params(self, item_type: str, genre: str) -> dict:
-        """The /Items filters shared by search and count — one source of truth."""
+        """The /Items filters shared by search and count."""
         params = {
             "IncludeItemTypes": _TYPE_MAP.get(item_type, _TYPE_MAP["all"]),
             "Recursive": "true",
@@ -172,11 +144,8 @@ class EmbyClient:
         return params
 
     async def async_count(self, item_type: str, genre: str) -> int:
-        """Total items matching the type/genre — the answer to a 'how many'.
-
-        Fetches one row only; Emby reports `TotalRecordCount` for the whole
-        match regardless of Limit, so no library dump is needed for a count.
-        """
+        """Total items matching the type/genre — the answer to a 'how many'."""
+        # One row is enough: Emby's TotalRecordCount counts the whole match regardless of Limit.
         params = {**self._library_params(item_type, genre), "Limit": 1}
         data = await self._get("/Items", params)
         if not isinstance(data, dict):
@@ -186,12 +155,9 @@ class EmbyClient:
     async def async_search(
         self, query: str, item_type: str, genre: str, limit: int, status: str = "all"
     ) -> tuple[list[dict], int]:
-        """Return (items capped at `limit`, total matching in the library).
+        """Return (items capped at `limit`, total matching in the library), each item with its watch state.
 
-        An empty query lists all items of the type/genre. `TotalRecordCount`
-        gives the true total even when the returned page is capped, so the
-        caller can say "showing 25 of 300". Runs user-scoped so every title
-        carries its watch state; status other than "all" filters by it.
+        An empty query lists all items of the type/genre; a status other than "all" filters by watch state.
         """
         params = {
             **self._library_params(item_type, genre),
@@ -211,10 +177,7 @@ class EmbyClient:
     async def async_recent(
         self, kind: str, item_type: str, limit: int
     ) -> list[dict]:
-        """Items ordered by recency: continue-watching, recently played, or added.
-
-        User-scoped (playstate + per-user recency), newest first.
-        """
+        """The user's items by recency, newest first: continue-watching, recently played, or added."""
         playstate_filter, sort_by = _RECENT[kind]
         params = {
             **self._library_params(item_type, ""),
@@ -286,14 +249,11 @@ class EmbyClient:
             resp.raise_for_status()
 
 
-# --- pure helpers (the logic worth a test without a live server) --------------
-
-
 _LABEL = {"movie": "movies", "series": "series", "all": "items"}
 
 
 def _scope(item_type: str, genre: str = "", query: str = "") -> str:
-    """Human phrase for what was asked: the genre, the item kind and the search term, where given."""
+    """Human phrase for what was asked."""
     label = _LABEL.get(item_type, "items")
     if genre:
         label = f"{genre} {label}"
@@ -303,13 +263,9 @@ def _scope(item_type: str, genre: str = "", query: str = "") -> str:
 
 
 def _playstate(item: dict) -> str:
-    """Watched / percent / in-progress / unwatched, when playstate is present.
-
-    Empty string when the item carries no UserData (a server-scoped call without
-    a user), so the line stays as it was before playstate existed.
-    """
+    """Watched / percent / in-progress / unwatched; empty when the item carries no UserData."""
     if "UserData" not in item:
-        return ""  # server-scoped call carried no playstate — say nothing
+        return ""  # a server-scoped call carries no playstate
     user_data = item["UserData"] or {}
     if user_data.get("Played"):
         return " — watched"
@@ -355,12 +311,7 @@ def _session_name(s: dict) -> str:
 
 
 def _match_session(sessions: list[dict], player: str) -> dict | None:
-    """First controllable session whose device name or client matches `player`.
-
-    Case-insensitive substring of the device name or the client name. Only
-    controllable sessions are considered:
-    an offline player has no session and cannot be woken from here.
-    """
+    """First controllable session whose device name or client contains `player`, in any case."""
     needle = player.strip().lower()
     for s in _controllable(sessions):
         if needle in (s.get("DeviceName") or "").lower() or needle in (
@@ -371,12 +322,7 @@ def _match_session(sessions: list[dict], player: str) -> dict | None:
 
 
 def _session_on_host(sessions: list[dict], host: str | None) -> dict | None:
-    """The controllable session connecting from `host` — the device's own IP.
-
-    Emby reports each session's client address as RemoteEndPoint; the androidtv
-    entity knows its device's ADB host. Same address = that device's player is
-    already online, whatever name it reports.
-    """
+    """The controllable session connecting from `host`, the device's ADB address: its player, whatever its name."""
     if (address := _address(host)) is None:
         return None
     for s in _controllable(sessions):
@@ -415,13 +361,7 @@ async def _launch(hass: HomeAssistant, wake: Wake) -> None:
 
 
 async def _connected(client: EmbyClient, wake: Wake, before: set[str]) -> dict | None:
-    """The launched player's session, read every WAKE_POLL_S for WAKE_TIMEOUT_S; None when it does not come.
-
-    It is the one connecting from the device's address. A host that is a name, or none, cannot be matched: the first
-    session that was not there before the launch is the player. Behind a proxy, Emby sees the proxy's address: when no
-    session comes from the device's own, the one new session of the launched app at the end of the wait is the player.
-    Another client opening Emby meanwhile is none of them.
-    """
+    """The launched player's session, read every WAKE_POLL_S for WAKE_TIMEOUT_S; None when it does not come."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + WAKE_TIMEOUT_S
     fresh: list[dict] = []
@@ -436,6 +376,7 @@ async def _connected(client: EmbyClient, wake: Wake, before: set[str]) -> dict |
         fresh = [s for s in _controllable(sessions) if s.get("Id") not in before]
         if fresh and _address(wake.host) is None:
             return fresh[0]
+    # Behind a proxy Emby sees the proxy's address: then the one new session of the launched app is the player.
     launched = [s for s in fresh if WAKE_CLIENT in (s.get("Client") or "").lower()]
     return launched[0] if len(launched) == 1 else None
 
@@ -465,9 +406,7 @@ def _filter_candidates(
 ) -> dict[str, str]:
     """The candidate set the user's player picker allows.
 
-    Nothing configured = every androidtv player is a wake candidate (auto-
-    discovery). A configured list is exclusive: only those entities may be
-    launched, so an unconfigured device never gets an app started on it.
+    `allowed` None: every androidtv player. A list is exclusive, so no other device gets an app started on it.
     """
     if allowed is None:
         return candidates
@@ -475,13 +414,7 @@ def _filter_candidates(
 
 
 def _wake_candidates(hass) -> dict[str, str]:
-    """The androidtv media players known to Home Assistant: {entity_id: name}.
-
-    One thin seam over the entity registry; everything matching happens on the
-    plain dict, so the logic is testable without a live hass. A lookup that
-    cannot run (no registry, tests) degrades to no candidates — auto-wake is
-    best-effort and the no-player error path must keep working without it.
-    """
+    """The androidtv media players known to Home Assistant: {entity_id: name}."""
     if hass is None:  # tests call the tools without a hass
         return {}
     registry = er.async_get(hass)
@@ -501,11 +434,7 @@ def _match_wake_entity(
 ) -> tuple[str | None, list[str]]:
     """The one androidtv player the request name fits, or which ones are ambiguous.
 
-    Matches on shared words between the request and the display name — neither
-    needs to be a substring of the other — and, as a fallback, the request as a
-    whole inside the entity_id with underscores read as spaces. Returns (None, hits) when
-    several fit — launching on a guess would start an app on the wrong TV, so
-    that stays a question, not a dice roll.
+    Several fits return (None, hits): launching on a guess would start an app on the wrong TV.
     """
     needle = player.strip().lower()
     if not needle:
@@ -518,9 +447,6 @@ def _match_wake_entity(
     if len(hits) == 1:
         return hits[0], []
     return None, hits
-
-
-# --- tools --------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -648,16 +574,13 @@ def _controlled_session(playing: list[dict], player: str) -> dict:
 
 
 async def _shows(client: EmbyClient, session_id: str, state: str) -> bool:
-    """Whether the session shows `state` within CONTROL_READS reads; a session gone has stopped.
-
-    A read that fails is skipped: the command was already taken, so a server hiccup is no reason to report it failed.
-    """
+    """Whether the session shows `state` within CONTROL_READS reads; a session gone has stopped."""
     for _ in range(CONTROL_READS):
         await asyncio.sleep(CONTROL_POLL_S)
         try:
             sessions = {s.get("Id"): s for s in await client.async_sessions()}
         except EMBY_ERRORS:
-            continue
+            continue  # the command was taken: a server hiccup is no reason to report it failed
         if _play_state(sessions.get(session_id, {})) == state:
             return True
     return False
@@ -688,8 +611,7 @@ async def next_up_emby(_hass: HomeAssistant, emby: Emby, args: ToolArgs, _contex
 async def play_emby(hass: HomeAssistant, emby: Emby, args: ToolArgs, context: llm.LLMContext) -> str:
     """Start the item on the player; a player that is not connected is started, and gets the item in the background.
 
-    The start takes several seconds, so the tool answers once the device is woken and the app launched: the user
-    hears at once that it is starting, and only a start that fails is told later (_play_when_connected).
+    Answers once the app is launched; a start that fails is told to the user later (_play_when_connected).
     """
     item_id = args["item_id"]
     player = args["player"]
@@ -698,7 +620,6 @@ async def play_emby(hass: HomeAssistant, emby: Emby, args: ToolArgs, context: ll
     except EMBY_ERRORS as err:
         raise _failed("play_emby", f"Cannot reach Emby: {type(err).__name__}: {err}") from err
 
-    # The androidtv players this play may wake — one registry walk, reused by both the wake and the no-player hint.
     candidates = _filter_candidates(_wake_candidates(hass), emby.wake_entities)
     target = _match_session(sessions, player)
     wake = None
@@ -745,14 +666,11 @@ def _wake(hass: HomeAssistant, candidates: dict[str, str], player: str, wake_ent
 
 
 def _no_player(sessions: list[dict], candidates: dict[str, str], player: str) -> str:
-    """Why nothing plays: the connected players, and the Android TV players that can be started.
-
-    Teach the model the vocabulary that works: Android TV names wake. Listing them keeps it from reaching for other
-    media players. No hint for a picker that excluded every entity.
-    """
+    """Why nothing plays: the connected players, and the Android TV players that can be started."""
     names = [_session_name(s) for s in _controllable(sessions)]
     available = ", ".join(names) if names else "none are connected right now"
     message = f"No connected Emby player matches '{player}'. Available: {available}."
+    # Listing the startable players keeps the model from reaching for other media players.
     if candidates:
         startable = ", ".join(name or eid for eid, name in candidates.items())
         message += (
@@ -767,13 +685,11 @@ def _wake_target(
 ) -> tuple[tuple[str, str] | None, str]:
     """What to launch for this player request: ((entity_id, app), note).
 
-    The one candidate androidtv player whose name shares words with the request is launched with the default Emby
-    client (WAKE_DEFAULT_APP). (None, "") means nothing fits and the caller falls through to the no-player error;
-    (None, note) is a question the user must answer (several players fit). A single configured player is always the
-    target, whatever the request calls it — the user picked it for exactly this.
+    (None, "") when nothing fits; (None, note) when several players fit and the user must pick one.
     """
     if not candidates:
         return None, ""
+    # A single configured player is the target whatever the request calls it: the user picked it for this.
     if wake_entities and len(candidates) == 1:
         return (next(iter(candidates)), WAKE_DEFAULT_APP), ""
     hit, ambiguous = _match_wake_entity(candidates, player)
@@ -900,9 +816,6 @@ SPECS: tuple[ToolSpec[Emby], ...] = (
 )
 
 
-# --- the tool set's subentry: its tools, form and check ------------------------
-
-
 def build(
     hass: HomeAssistant, entry: ConfigEntry, data: Mapping[str, Any], record_failure: RecordFailure | None
 ) -> list[llm.Tool]:
@@ -911,8 +824,7 @@ def build(
     api_key = (data.get(CONF_EMBY_API_KEY) or "").strip()
     if not url or not api_key:
         return []
-    # Entity selector stores a plain list of entity ids (multiple=true) — an empty/missing selection means "no
-    # restriction", not "no wake".
+    # An empty or missing selection means no restriction, not no wake.
     raw_wake = data.get(CONF_WAKE_ENTITIES)
     wake_entities = [raw_wake] if isinstance(raw_wake, str) else (raw_wake or None)
     def run_in_background(job: Coroutine[Any, Any, None], name: str) -> object:
@@ -929,12 +841,8 @@ def build(
 
 
 def subentry_schema(data: dict) -> dict:
-    """The fields of the Emby subentry form.
-
-    suggested_value, NOT default: clearing a text field makes the frontend omit
-    the key, and a `default` would put the old value straight back — so a field
-    could never be emptied.
-    """
+    """The fields of the Emby subentry form."""
+    # suggested_value, not default: the frontend omits a cleared field, and a default would put the old value back.
     return {
         probatio.Optional(
             CONF_EMBY_URL, description={"suggested_value": data.get(CONF_EMBY_URL, "")}

@@ -1,7 +1,4 @@
-"""AI Suite's tool sets: each one a subentry a home adds or removes, with its tools, its form and its status check.
-
-A new tool set is a module with its tools (ToolSpecs and a `build`) and one entry in TOOL_SETS.
-"""
+"""AI Suite's tool sets: each one a subentry a home adds or removes, with its tools, its form and its status check."""
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -37,10 +34,6 @@ class ToolSet:
     with_entry: bool = False
 
 
-def _no_fields(_data: dict) -> dict:
-    return {}
-
-
 async def _nothing_to_check(_hass: HomeAssistant, _data: dict) -> str | None:
     return None
 
@@ -56,7 +49,10 @@ TOOL_SETS = {
     ),
     SUBENTRY_CALENDAR: ToolSet(
         form=SettingsForm(
-            subentry_type=SUBENTRY_CALENDAR, title="Calendar", fields=_no_fields, check=_nothing_to_check
+            subentry_type=SUBENTRY_CALENDAR,
+            title="Calendar",
+            fields=calendar.subentry_schema,
+            check=calendar.async_check_default_calendar,
         ),
         build=calendar.build,
         with_entry=True,
@@ -77,11 +73,9 @@ def subentry_flows() -> dict[str, type[ConfigSubentryFlow]]:
 
 
 def created_with_entry() -> list[ConfigSubentryData]:
-    """The tool sets a new AI Suite entry starts with.
-
-    Plain dicts, as HA's own integrations pass them: the UI's flow view turns the created entry into JSON, subentries
-    included, and a MappingProxyType has no JSON form.
-    """
+    """The tool sets a new AI Suite entry starts with."""
+    # Plain dicts: the UI's flow view turns the created entry, subentries included, into JSON; a MappingProxyType has
+    # no JSON form.
     return [
         ConfigSubentryData(data={}, subentry_type=subentry_type, title=tool_set.form.title, unique_id=None)
         for subentry_type, tool_set in TOOL_SETS.items()

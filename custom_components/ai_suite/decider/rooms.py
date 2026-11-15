@@ -1,8 +1,4 @@
-"""Whether a request names a room, by its words.
-
-The home's own areas and their aliases count, and every language's words for rooms and floors (languages/), also
-those a home does not have, also inside compounds. No HA imports.
-"""
+"""Whether a request names a room, by its words."""
 
 from collections.abc import Mapping
 

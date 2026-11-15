@@ -297,12 +297,27 @@
       "step": {
         "user": {
           "title": "Calendar",
-          "description": "Lets the assistant read every exposed calendar at once, each entry with its weekday. No settings: remove it to turn these tools off."
+          "description": "Lets the assistant read every exposed calendar at once, each entry with its weekday, and add an entry to a calendar that can take new entries. Remove it to turn these tools off.",
+          "data": {
+            "default_calendar": "Default calendar for new entries"
+          },
+          "data_description": {
+            "default_calendar": "Optional. The calendar a new entry goes to when the request names none. Empty: the only exposed calendar that can take new entries; with several, the assistant asks which one."
+          }
         },
         "reconfigure": {
           "title": "Calendar",
-          "description": "No settings: remove it to turn these tools off."
+          "description": "Remove it to turn these tools off.",
+          "data": {
+            "default_calendar": "Default calendar for new entries"
+          },
+          "data_description": {
+            "default_calendar": "Optional. The calendar a new entry goes to when the request names none. Empty: the only exposed calendar that can take new entries; with several, the assistant asks which one."
+          }
         }
+      },
+      "error": {
+        "cannot_connect": "{error}"
       },
       "abort": {
         "reconfigure_successful": "The settings have been changed",

@@ -1,8 +1,6 @@
 """What the decider does with each Home Assistant domain, in one table.
 
-A domain's row says whether its state answers a question, whether HA's on/off intents switch it, whether its reading
-carries a temperature, and the states each change (changes.py) ends in. The states are HA's, as its purpose-specific
-triggers (door, light, lock, ...) have them. No HA imports.
+The states are HA's, as its purpose-specific triggers (door, light, lock, ...) have them.
 """
 
 from collections.abc import Mapping

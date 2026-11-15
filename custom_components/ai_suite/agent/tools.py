@@ -1,9 +1,6 @@
 """An agent's tools: the LLM APIs it selects, each tool under a plain name, some left out.
 
-Tool names come with prefixes: HA's merge puts the API's name in front (`<api>__<tool>`), HA's own tools their domain.
-The model gets each tool by its plain name, the part after the last prefix, of letters, digits and underscores only,
-which small models read and call more reliably; a name two tools would share gets its API's id in front. Each tool
-is wrapped to run under its own name and to name the integration that provides it.
+A plain name drops the prefixes HA puts in front (`<api>__<tool>`): small models read and call it more reliably.
 """
 
 from collections import Counter
@@ -34,16 +31,14 @@ _LOGGER = logging.getLogger(__name__)
 # What a plain name holds: a model's tool-call parser may read anything else as an operator.
 _NOT_IN_A_NAME = re.compile(r"[^A-Za-z0-9_]")
 
-# Where one of AI Suite's tools does a Home Assistant tool's job better, the agent has only ours: the model gets only
-# the tools it needs. Only Home Assistant's own tools are replaced; which tools of other integrations an agent uses is
-# the user's choice (its APIs and "Tools left out").
+# Where one of AI Suite's tools does a Home Assistant tool's job better, the agent has only ours. Only HA's own tools
+# are replaced: which tools of other integrations an agent uses is the user's choice (its APIs and "Tools left out").
 REPLACES = {
     # Every entry with its weekday; HA's gives ISO dates only, and a model that uses it alone names weekdays wrong.
     "get_calendar_events": {"calendar__get_events"},
 }
-# With the schedule, its timers replace Home Assistant's: those exist only on satellites that can ring and are seen by
-# nothing else (no entity, no event), the schedule's ring anywhere and show in its Timers sensor. So the agent gets
-# none of HA's timer tools, nor the line HA's prompts add on a device without them.
+# With the schedule, its timers replace HA's, which exist only on satellites that can ring and show nowhere else (no
+# entity, no event). So the agent gets none of HA's timer tools, nor the line HA's prompts add on a device without them.
 HA_TIMER_TOOLS = frozenset({
     intent.INTENT_START_TIMER, intent.INTENT_CANCEL_TIMER, intent.INTENT_CANCEL_ALL_TIMERS, intent.INTENT_TIMER_STATUS,
     intent.INTENT_INCREASE_TIMER, intent.INTENT_DECREASE_TIMER, intent.INTENT_PAUSE_TIMER, intent.INTENT_UNPAUSE_TIMER,
@@ -88,14 +83,11 @@ class AgentAPI(llm.API):
 
 
 def _date_line(tools: list[llm.Tool]) -> str:
-    """Today's date, where HA would write its date and time line, when HA leaves that line out.
-
-    HA writes no date while a GetDateTime tool exists (conversation/chat_log.py). A model that skips the tool then
-    guesses the year for date ranges ahead. Code writes the weekday: from the date alone a model counts weekdays wrong
-    ("the day after tomorrow" a day off). The line changes once a day, so the prompt stays cacheable.
-    """
+    """Today's date with its weekday, when HA leaves out its date line: it does while a GetDateTime tool exists."""
     if not any(tool.name.endswith("GetDateTime") for tool in tools):
         return ""
+    # A model that skips the tool guesses the year, and from a date alone it counts weekdays wrong. The line changes
+    # once a day, so the prompt stays cacheable.
     today = dt_util.now()
     return f"Today is {WEEKDAYS[today.weekday()]}, {today:%Y-%m-%d}."
 
@@ -144,15 +136,14 @@ class WrappedTool(llm.Tool):
     ) -> llm.ToolResult | JsonObjectType:
         """The tool's result; every failure a HomeAssistantError, and a failed call is not run again in the turn.
 
-        HA's chat log hands the model only a HomeAssistantError (or invalid arguments) as the tool's error; any other
-        exception ends the turn in silence, and what earlier tools did goes unreported. A model repeats a failed call
-        unchanged, so a slow tool's wait would come twice: the repeat gets the first call's error as it was, and the
-        model reads the same result as if it had run. A note that it was not run steers a model to other actions.
+        HA's chat log hands the model only a HomeAssistantError (or invalid arguments); others end the turn in silence.
         """
         signature = _signature(self.name, tool_input.tool_args)
+        # A model repeats a failed call unchanged: the repeat gets the first error as it was, without a slow tool's wait.
         if (earlier := self._failed.get(signature)) is not None:
             raise earlier
-        own_input = llm.ToolInput(tool_name=self.tool.name, tool_args=tool_input.tool_args, id=tool_input.id)
+        own_input = llm.ToolInput(tool_name=self.tool.name, id=tool_input.id,
+                                  tool_args=lists_unquoted(self.tool.parameters, tool_input.tool_args))
         try:
             return await self.tool.async_call(hass, own_input, llm_context)
         except (HomeAssistantError, probatio.Invalid) as err:
@@ -169,9 +160,7 @@ class WrappedTool(llm.Tool):
 def visible_tools(instances: list[llm.APIInstance]) -> list[WrappedTool]:
     """Every tool of the APIs under its plain name, without the standard ones ours replace.
 
-    A name two tools would share would leave the model unable to tell them apart, so those get their API's id and
-    their full name instead. The tools share one record of the turn's failed calls (forget_failed_calls).
-    HA's play tool is checked (media.py): it reports success whether the player plays or not.
+    A name two tools would share gets its API's id in front. The tools share one record of the turn's failed calls.
     """
     offered = [(instance.api, tool) for instance in instances for tool in instance.tools]
     replaced = set().union(*(REPLACES.get(tool.name, set()) for _, tool in offered))
@@ -195,6 +184,51 @@ def forget_failed_calls(instance: llm.APIInstance) -> None:
 
 def _signature(name: str, args: Mapping[str, Any]) -> str:
     return f"{name} {json.dumps(args, sort_keys=True, default=str)}"
+
+
+def lists_unquoted(parameters: Callable[[Any], Any], args: Mapping[str, Any]) -> dict[str, Any]:
+    """The arguments, each JSON list written as a string passed as that list where the tool's schema takes it there.
+
+    Models write a list as text ('["light"]') where a schema takes a string or a list; a string-only parameter keeps it.
+    """
+    lists = {key: listed for key, value in args.items() if (listed := _json_list(value)) is not None}
+    if not lists:
+        return dict(args)
+    if _accepts(parameters, {**args, **lists}):
+        return {**args, **lists}
+    return _unquoted_one_by_one(parameters, args, lists)
+
+
+def _unquoted_one_by_one(
+    parameters: Callable[[Any], Any], args: Mapping[str, Any], lists: dict[str, list[Any]]
+) -> dict[str, Any]:
+    """The arguments with each of `lists` the schema takes in its place, beside those taken before."""
+    unquoted = dict(args)
+    # Until a pass takes none: one taken may let another fit. A pass tries every list left, so order does not matter.
+    while taken := {key: listed for key, listed in lists.items() if _accepts(parameters, {**unquoted, key: listed})}:
+        unquoted |= taken
+        lists = {key: listed for key, listed in lists.items() if key not in taken}
+    return unquoted
+
+
+def _json_list(value: Any) -> list[Any] | None:
+    """The list a string holds as JSON; None for any other value."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
+def _accepts(parameters: Callable[[Any], Any], args: Mapping[str, Any]) -> bool:
+    """Whether the schema takes the arguments; any failure of the check counts as no."""
+    try:
+        parameters(args)
+    except Exception:  # noqa: BLE001 - probatio.Invalid, or a validator not made for a list failing another way
+        return False
+    return True
 
 
 def plain_name(name: str) -> str:

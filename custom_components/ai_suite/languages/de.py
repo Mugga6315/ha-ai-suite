@@ -47,6 +47,9 @@ LANGUAGE = Language(
         window=r"letzten|vergangenen|nächsten|kommenden",
         time_units=r"sekunden?|minuten?|stunden?|tagen?|tage|wochen?|monaten?|monate|jahren?|jahre",
         clock=r"uhr",
+        day_suffix=r"\.",
+        day_month_link="",
+        months=r"januar|februar|märz|maerz|april|mai|juni|juli|august|september|oktober|november|dezember",
     ),
     calendar=Calendar(
         next_up=r"\b(?:als )?n(?:ä|ae)chste[nrs]?\b|\bdemn(?:ä|ae)chst\b|\b(?:bevor|an)stehende?[nrs]?\b",

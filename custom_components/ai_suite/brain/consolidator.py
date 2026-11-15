@@ -32,27 +32,18 @@ from .store import Store, strip_bullet_prefix, word_in
 MAX_DELETE_LINES = 100
 MAX_RULE_MOVES = 5
 
-# The consolidator runs nightly and nothing waits on it, so it gets a long leash:
-# a big triage prompt and a slow local model are both fine here. Only the voice
-# path has to be snappy.
+# Nightly with nobody waiting, so a long leash: a big triage prompt and a slow local model are fine here.
 LLM_TIMEOUT_SECONDS = 600
 
 
 def _fact_is_in_wiki(fact: str, wiki_text: str) -> bool:
-    """Is this fact present in the wiki? Word containment, not substring.
-
-    The consolidator rewrites as it merges (the same words in another order),
-    so an exact-substring gate never matches and the raw bullet is stranded
-    forever. Requiring every significant word still means a fact that was
-    never merged cannot pass: its distinctive words are simply absent.
-    """
+    """Is this fact present in the wiki? Word containment, not substring."""
     fact = strip_bullet_prefix(fact).lower()
     words = {w for w in re.findall(r"\w+", fact) if len(w) > 3}
     if not words:  # too short to have distinctive words - fall back to substring
         return fact in wiki_text
-    # Whole words, not substrings: a word must not be satisfied by a longer
-    # word that contains it on an unrelated page. Stricter means a clear is refused
-    # rather than wrongly allowed, which is the safe direction for this gate.
+    # Whole words: a word must not be met by a longer word on an unrelated page. Stricter refuses a clear rather
+    # than wrongly allowing it, the safe direction for this gate.
     return all(word_in(w, wiki_text) for w in words)
 
 
@@ -100,8 +91,7 @@ class Consolidator:
             plan = await self._client.complete_json(
                 _SYSTEM, prompt, timeout=LLM_TIMEOUT_SECONDS, temperature=0.3,
                 response_format={"type": "json_object"},
-                # Thinking is worth it here: the triage reasons about failure patterns in the background, with
-                # nobody waiting.
+                # Thinking pays here: the triage reasons in the background, with nobody waiting.
                 **effort_options(self._effort),
             )
         except LLMError as err:
@@ -147,14 +137,8 @@ class Consolidator:
             except ValueError as e:
                 LOGGER.warning("Consolidator: %s, skipping", e)
 
-        # A memory may only be cleared once its fact is actually in
-        # the wiki. Checked against the wiki as it stands *after* this run's
-        # writes, not against this run's writes alone - a fact merged on an
-        # earlier night is still in the wiki, and gating on "written just now"
-        # would leave those raw bullets in memories/ forever.
-        # The snippet is usually copied straight out of the memory file, so it
-        # carries the stored "- <timestamp> " prefix the wiki page does not -
-        # strip it, or every clear is skipped for the wrong reason.
+        # Checked against the whole wiki after this run's writes: a fact merged on an earlier night is still there, and
+        # gating on this run's writes alone would strand those bullets in memories/ forever.
         wiki_now = await self._store.async_read_all_wiki()
         all_wiki_content = " ".join(wiki_now.values()).lower()
         skipped_clears = []
@@ -166,7 +150,6 @@ class Consolidator:
                 skipped_clears.append(item)
         memories_to_clear = valid_clears
 
-        # Count matched bullets once per distinct path
         path_containings: dict[str, list[str]] = {}
         for item in memories_to_clear:
             path_containings.setdefault(item["path"], []).append(item["containing"])
@@ -269,7 +252,6 @@ def _count_matched_bullets(text: str, containings: list[str]) -> int:
     return count
 
 
-# --- librarian subentry interface (see features.py) ---------------------------
 # The model is Memory's background model, so this subentry only carries the schedule and the effort.
 
 

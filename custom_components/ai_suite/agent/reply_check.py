@@ -1,8 +1,6 @@
 """The loop's reply is checked before the user hears it; on a fault the model answers once more, with its tools.
 
-The checks are those that find faults without harming right replies: language, made-up numbers, raw markup. The
-retry runs only in a turn that changed nothing: a retry after an action repeats the action. No check for whose value
-a reply gives (it flags more right replies than wrong ones) or for declines (a retry does not fix them).
+The retry runs only in a turn that changed nothing: a retry after an action repeats the action.
 """
 
 from dataclasses import dataclass
@@ -12,16 +10,29 @@ from typing import Any
 
 from homeassistant.components import conversation
 
+from ..decider.decision import spelled_out
 from ..languages import LANGUAGE_NAMES, LANGUAGES, alternatives
 
 LANGUAGE, NUMBERS, RAW = "language", "numbers", "raw"
 
 _NUMBER = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*")
 _LIST_MARKER = re.compile(r"(?m)^\s*\d+[.)]\s")
-# Dates and clock times are days and times, not readings; a clock time also as an hour with an hour word (a model
-# may give a UTC forecast hour in local time, so the hour is in no tool result), and a range of such hours.
+_MONTH = alternatives(lambda language: language.time.months)
+_DAY = r"(?:3[01]|[12]\d|0?[1-9])"
+_YEAR = r"(?:,?\s*(?:19|20)\d{2}\b)?"
+_DAY_SUFFIX = rf"{alternatives(lambda language: language.time.day_suffix)}?"
+_DAY_MONTH_LINK = rf"(?:{alternatives(lambda language: language.time.day_month_link)}\s+)?"
+# Units that make a number directly after a month's name a reading, not a day, besides the languages' unit words:
+# symbols no language owns and no sentence continues a date with.
+_UNIT_SYMBOLS = r"[%°€$]|(?:[kMm]?Wh?|ppm|m[³3]|l|EUR|Euro|kg|km|hPa|mbar|lx|dB)\b"
+_UNIT = (rf"(?:{_UNIT_SYMBOLS}|{alternatives(lambda language: language.time.time_units)}\b"
+         rf"|{alternatives(lambda language: language.reads.degrees)}\b)")
+# Dates and clock times are no readings: a day beside a month's name (a year may follow, a unit may not), a clock
+# time, and an hour with an hour word or a range of them (a model may give a UTC hour local, so no result holds it).
 _DATE_OR_TIME = re.compile(
     r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}(?::\d{2})?\b"
+    rf"|(?<![\w.,]){_DAY}{_DAY_SUFFIX}\s*{_DAY_MONTH_LINK}{_MONTH}\b{_YEAR}"
+    rf"|\b{_MONTH}\s+{_DAY}(?![.,]\d){_DAY_SUFFIX}\b{_YEAR}(?!\s*{_UNIT})"
     rf"|\b(?:\d{{1,2}}\s*[--]\s*)?\d{{1,2}}\s*{alternatives(lambda language: language.time.clock)}(?!\w)",
     re.IGNORECASE,
 )
@@ -58,10 +69,9 @@ class Fault:
 
 
 def turn_of(chat_log: conversation.ChatLog, user_text: str, told: str | None = None) -> Turn:
-    """The turn of `user_text` in the chat log, with the conversation before it.
+    """The turn of `user_text` in the chat log, with the conversation before it: follow-ups use earlier results.
 
-    A follow-up answers from earlier tool results too. `told`: what the loop told the model with the request
-    (request.TurnNote); it counts as seen, not as the user's words.
+    `told`: what the loop told the model with the request (request.TurnNote); it counts as seen, not as user's words.
     """
     content = list(chat_log.content)
     reply = content[-1].content or "" if content and content[-1].role == "assistant" else ""
@@ -93,11 +103,7 @@ def faults(turn: Turn, language: str | None) -> list[Fault]:
 
 
 def retry_request(found: list[Fault]) -> str:
-    """The message that asks for the reply again.
-
-    The user never hears the checked reply, so the new one must not refer to it (without that line models refer back
-    to it or apologise).
-    """
+    """The message that asks for the reply again, one the user hears instead of the checked reply."""
     return ("Check of the reply above, before the user hears it: " + " ".join(f.text for f in found)
             + " Write the reply the user will hear instead. The user has not heard the reply above: do not refer to it "
             "or apologize for it.")
@@ -117,13 +123,10 @@ def _message(content: conversation.Content) -> dict[str, Any]:
     return message
 
 
-# --- language -------------------------------------------------------------------------------------------------------
-
 def language_of(text: str) -> str | None:
     """The language of the user's words, by common words: the one with more of them; None when they do not decide.
 
-    The pipeline's language is no answer: an English question in a German pipeline is English, and a reply right in
-    English would be turned German by the retry.
+    Not the pipeline's language: an English question in a German pipeline is English; a retry would turn it German.
     """
     counts = _common_words(text)
     best = max(counts, key=lambda code: counts[code])
@@ -131,7 +134,7 @@ def language_of(text: str) -> str | None:
 
 
 def wrong_language(reply: str, language: str) -> bool:
-    """By common words; a reply in a language without a module (languages/) passes."""
+    """Whether the reply is in another language than `language`, by common words; one without a module passes."""
     if language not in LANGUAGES:
         return False
     counts = _common_words(reply)
@@ -144,30 +147,24 @@ def _common_words(text: str) -> dict[str, int]:
     return {code: sum(word in language.function_words for word in words) for code, language in LANGUAGES.items()}
 
 
-# --- made-up numbers ------------------------------------------------------------------------------------------------
-
 def invented_numbers(reply: str, seen: str) -> list[str]:
-    """Numbers in the reply that no tool gave and no step of arithmetic makes.
-
-    Numbers in the reply that are neither a value the model saw nor computed from the user's own numbers and the
-    values the reply took from the data (one step of arithmetic, a unit conversion, a percent as a fraction).
-    """
-    sources = _source_values(seen)
+    """Numbers in the reply that no value the model saw gives and no step of arithmetic makes."""
+    # A number the user said is the same whether it was transcribed as digits or as a word; number words elsewhere
+    # are no source.
+    user_words = spelled_out(_user_words(seen))
+    sources = _source_values(seen) + _source_values(user_words)
     said = _TIME_WINDOW.sub(" ", _DATE_OR_TIME.sub(" ", reply))
     tokens = [(t, vs) for t, vs in readings(said) if not all(v <= _SMALL_INT and v == int(v) for v in vs)]
     unplaced = [(t, vs) for t, vs in tokens if not any(_matches(t, v, sources) for v in vs)]
     if not unplaced:
         return []
     placed = [v for t, vs in tokens if (t, vs) not in unplaced for v in vs]
-    computed = _derived([v for _, vs in readings(_user_words(seen)) for v in vs] + placed)
+    computed = _derived([v for _, vs in readings(user_words) for v in vs] + placed)
     return [t for t, vs in unplaced if not any(_matches(t, v, computed) for v in vs)]
 
 
 def readings(text: str) -> list[tuple[str, list[float]]]:
-    """Each number in the text with the values it can mean.
-
-    One separator is a decimal point, or a thousands separator before three digits; several are thousands separators.
-    """
+    """Each number in the text with the values it can mean ("1.500": 1.5 and 1500)."""
     found = []
     for token in _NUMBER.findall(_LIST_MARKER.sub(" ", text)):
         parts = re.split(r"[.,]", token)
@@ -197,11 +194,7 @@ def _matches(token: str, value: float, sources: list[float]) -> bool:
 
 
 def _derived(operands: list[float]) -> list[float]:
-    """Every value one step of arithmetic makes from the operands.
-
-    One step of arithmetic over the operands (sum, difference, product, quotient, percent), a percent as a
-    fraction and back, and each operand converted between common units.
-    """
+    """Every value one step of arithmetic, a percent as a fraction or a unit conversion makes from the operands."""
     values = []
     for a in operands:
         values += [a / 100, a * 100]

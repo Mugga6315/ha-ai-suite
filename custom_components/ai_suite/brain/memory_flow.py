@@ -1,7 +1,4 @@
-"""The Memory subentry flow: where the store lives and the background model.
-
-The LLM server is AI Suite's, so only its model is asked.
-"""
+"""The Memory subentry flow: the store's folder and the background model (the server is AI Suite's)."""
 import os
 import pathlib
 from typing import Any

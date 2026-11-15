@@ -1,12 +1,7 @@
 """A turn's STT audio: the WAV files HA's `assist_pipeline: debug_recording_dir:` kept for the turn's run.
 
-HA writes each run's audio to `<dir>/[<device_id>/]<pipeline name>/<monotonic_ns>/` (assist_pipeline/run.py), the
-ns taken just before the run's run-start event: `00_wake-<entity>.wav` and `01_stt-<engine>.wav`, 16 kHz mono s16.
-The folder name carries no run id, so the run's folder is the one whose ns lies nearest the run-start's monotonic
-time, which follows from the turn's open (same process, same clock). The folder is deleted once its clips were sent;
-HA never reads it back.
-
-Every file system access runs in the executor.
+HA names a run's folder `<dir>/[<device_id>/]<pipeline name>/<monotonic_ns>/` (assist_pipeline/run.py), no run id:
+the run's folder is the one whose ns lies nearest the run-start's monotonic time.
 """
 
 import logging
@@ -31,8 +26,7 @@ _KINDS: dict[str, Literal["wake", "stt"]] = {"00_wake-": "wake", "01_stt-": "stt
 async def find_clips(hass: HomeAssistant, ref: RunRef, trace: TurnTrace) -> tuple[AudioClip, ...]:
     """The run's clips; empty without debug_recording_dir, without a folder, or when two folders could be it.
 
-    A clip over AUDIO_MAX_BYTES is left out (the monitor takes no more). Call after the run's run-end: HA closes
-    the files before it.
+    Call after the run's run-end: HA closes the files before it.
     """
     if ref.recording_dir is None or ref.pipeline_name is None:
         return ()

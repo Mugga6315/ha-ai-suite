@@ -1,7 +1,4 @@
-"""What the text model is sent each round.
-
-Each round holds the chat log as chat-completions messages, the agent's tools and its settings.
-"""
+"""What the text model is sent each round: the chat log as chat-completions messages, the agent's tools and settings."""
 
 import base64
 from dataclasses import dataclass
@@ -85,22 +82,17 @@ async def messages(
 
 
 def with_text(entry: dict[str, Any], text: str) -> dict[str, Any]:
-    """The message with `text` added after its content.
-
-    A system prompt in parts reads as one text, so the added part opens with the blank line a single text gets.
-    """
+    """The message with `text` added after its content."""
     content = entry["content"]
     if not isinstance(content, list):
         return {**entry, "content": f"{content}\n\n{text}"}
+    # A system prompt in parts reads as one text: the added part opens with the blank line a single text gets.
     opening = "\n\n" if entry["role"] == "system" else ""
     return {**entry, "content": [*content, {"type": "text", "text": f"{opening}{text}"}]}
 
 
 def _system_prompt_marked(chat: list[dict[str, Any]], chat_log: conversation.ChatLog) -> list[dict[str, Any]]:
-    """The chat with its system prompt in two parts, the first marked for the server's prompt cache.
-
-    The second part holds what a turn changes (system_prompt.split); the parts joined are the prompt as it was.
-    """
+    """The chat with its system prompt in two parts: the stable one marked for the server's prompt cache, then the rest."""
     if not chat or chat[0]["role"] != "system":
         return chat
     prompt: str = chat[0]["content"]
@@ -119,7 +111,7 @@ async def message(
 ) -> dict[str, Any] | None:
     """One chat log entry as a chat message.
 
-    `send_reasoning`: an assistant message carries the model's reasoning (`reasoning_content`, which vLLM, llama.cpp and read).
+    `send_reasoning`: an assistant message carries the model's reasoning as `reasoning_content` (vLLM, llama.cpp).
     """
     if isinstance(content, conversation.ToolResultContent):
         return {"role": "tool", "tool_call_id": content.tool_call_id, "content": _result_text(content)}
@@ -137,9 +129,9 @@ async def message(
 
 
 def recent(chat: list[dict[str, Any]], max_history: int | None) -> list[dict[str, Any]]:
-    """The system prompt and the last `max_history` exchanges before the current one.
+    """The system prompt and the last `max_history` exchanges before the current one; None or below 0: all.
 
-    An exchange starts at a user message and keeps its tool calls and results whole. None (or below 0): all of them.
+    An exchange starts at a user message and keeps its tool calls and results whole.
     """
     if max_history is None or max_history < 0:
         return chat
@@ -151,13 +143,11 @@ def recent(chat: list[dict[str, Any]], max_history: int | None) -> list[dict[str
 
 
 def tool_specs(llm_api: llm.APIInstance | None) -> list[dict[str, Any]]:
-    """The tools as function definitions, sorted by name.
-
-    HA lists intent tools in registration order, which changes with every start, and the tools open the prompt: a new
-    order would void a server's whole prompt cache.
-    """
+    """The tools as function definitions, sorted by name."""
     if llm_api is None:
         return []
+    # HA lists intent tools in registration order, which changes with every start, and the tools open the prompt: a
+    # new order would void a server's whole prompt cache.
     tools = sorted(llm_api.tools, key=lambda tool: tool.name)
     return [_tool_spec(tool, llm_api.custom_serializer) for tool in tools]
 

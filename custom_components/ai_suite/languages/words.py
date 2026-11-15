@@ -1,8 +1,7 @@
 """The words and grammar every language module gives, by the part of AI Suite that reads them. No HA imports.
 
-A `str` field is a regular expression matched as it is: it carries its own word boundaries, except where its comment
-says it is a plain word list that the reading module bounds itself. An empty field means the language has no such
-words or grammar.
+A `str` field is a regular expression with its own word boundaries, unless its comment says plain word list (the
+reading module bounds it). An empty field: the language has no such words or grammar.
 """
 
 from dataclasses import dataclass, field
@@ -34,6 +33,9 @@ class Time:
     window: str  # a window's word before a count and a time unit (the last 3 days); plain word list
     time_units: str  # plain word list
     clock: str  # the word after an hour that makes it a clock time; plain word list
+    months: str  # the full names of the twelve months; plain word list
+    day_suffix: str  # what may follow a day's number directly (the dot, st, th); empty: nothing
+    day_month_link: str  # the word that may stand between a day and its month (the 13th of May); plain word list
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +90,7 @@ class Locks:
 
     unlocked: str
     locked: str
-    # A command whose verb is split: the lock verb first, its particle last, in the group "particle". Empty: the
-    # language does not split its verbs.
-    split: str = ""
+    split: str = ""  # a split verb: the lock verb first, its particle last in the group "particle"; empty: none
     unlock_particles: frozenset[str] = frozenset()  # the particles of `split` that unlock
 
 
@@ -144,8 +144,7 @@ class Numbers:
     one: str  # the word for one, counted only inside a compound (alone it is an article)
     teens: dict[str, int]  # ten to nineteen
     tens: dict[str, int]  # twenty to ninety, and a hundred
-    # A compound number word, with the groups "unit" and "tens" filled from the lists above; empty: none.
-    compound: str = ""
+    compound: str = ""  # a compound number word, the groups "unit" and "tens" filled from the lists above; empty: none
 
 
 @dataclass(frozen=True, slots=True)

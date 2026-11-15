@@ -1,8 +1,4 @@
-"""What Second Brain's background jobs run on.
-
-What Second Brain's background jobs (the librarian, the self-improvement review and pass, the rule compiler) run
-on: Memory's background model on AI Suite's LLM server.
-"""
+"""What Second Brain's background jobs (librarian, self-improvement, rule compiler) run on: Memory's model."""
 
 from typing import Any
 

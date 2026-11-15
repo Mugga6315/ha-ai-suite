@@ -15,7 +15,8 @@ Second Brain gives the assistant a memory it keeps as plain markdown in a git re
   unsure, the request goes to the text model (or to another conversation agent you choose).
 - **A text model with tools** for everything else: Home Assistant's own tools plus AI Suite's tool sets.
 - **Tool sets that answer, not dump data:** long-term statistics and state history, every calendar at once with
-  weekdays, and an Emby media library. The code works out dates, units and totals; the model gets the result.
+  weekdays and new calendar entries, and an Emby media library. The code works out dates, units and totals; the
+  model gets the result.
 - **Memory (Second Brain):** the assistant remembers what it is told, keeps it as markdown notes, and commits every
   change to git so it can be read and reverted.
 - **Household rules:** rules written in plain words ("Spiel Artist 1 means the band") are compiled for the decision
@@ -198,6 +199,16 @@ dates such as "yesterday" themselves.
 `get_calendar_events` reads every exposed calendar at once, for any range, each entry with its weekday, which models
 otherwise get wrong. A calendar can be named by its name or an alias. Calendars are not exposed by default; AI Suite
 raises a repair issue while none are.
+
+`add_calendar_event` adds an entry: all day (a birthday, a holiday, over one or several days) or at a time, with its
+end or its length. For an appointment without an end or a length, the assistant asks how long it lasts instead of
+guessing one. It only adds; it does not change or delete entries. The calendar must be exposed and able to take new
+entries (Local Calendar and CalDAV can, a Remote Calendar cannot). Without a calendar named in the request, the entry
+goes to the default calendar, else to the only calendar that can take it; with several and no default, the assistant
+asks which one.
+
+- **Default calendar for new entries** (optional): the calendar a new entry goes to when the request names none. It
+  must be exposed. While it is unavailable, no entry goes to another calendar in its place.
 
 ### Emby
 

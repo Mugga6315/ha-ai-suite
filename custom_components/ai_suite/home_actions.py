@@ -1,9 +1,4 @@
-"""A decided command run in Home Assistant.
-
-Devices go through HA's intents, music through Music Assistant; lists, forecasts, calendars, earlier values and last
-changes are read through HA's actions and the recorder. Each run gives the note the answer model words (api.DONE,
-NOT_POSSIBLE, NOTHING_TO_DO, or the facts read); what cannot be done as decided hands off.
-"""
+"""A decided command run in Home Assistant."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -125,11 +120,7 @@ class HomeActions:
         return self._note(f"{DONE}: {command.action} {target}" + (f" {value}" if value else ""))
 
     async def _list(self, request: decided.ListRequest) -> intent.IntentResponse:
-        """Change or read a list.
-
-        The decider picks the list and, for an entry already on it, one of the list's current entries (lists.py);
-        HA's list intents do the change.
-        """
+        """Change or read a list."""
         lists = {c.name: c for c in self.entities if c.domain == TODO}
         if not lists:
             raise HandOff("no list exposed")
@@ -153,11 +144,9 @@ class HomeActions:
         return self._note(f"{DONE}: {item} {action.done} {chosen.name}")
 
     async def _asked_entry(self, entries: list[str]) -> str | None:
-        """The answer to whether one item is on the list.
+        """The answer to whether one item is on the list, as a fact; None when the question names no item.
 
-        For a question whether one item is on the list, the answer as a fact (the item, then whether it is on it);
-        the entry is the decider's pick among the list's entries. None when the question names no item. Given the
-        entries alone, small answer models confirm an item missing from them.
+        The decider picks the entry: given the entries alone, small answer models confirm an item missing from them.
         """
         if (item := item_asked(self.user_input.text)) is None:
             return None
@@ -196,10 +185,7 @@ class HomeActions:
         return self._note(f"Forecast of {chosen.name}: {facts}")
 
     async def _calendar(self) -> intent.IntentResponse:
-        """The calendar facts the question asks for (decider/calendar.py).
-
-        The entries of the days the text names, the next or the last ones, or the one entry the decider picks.
-        """
+        """The calendar facts the question asks for (decider/calendar.py)."""
         calendars = [c.entity_id for c in self.entities if c.domain == CALENDAR]
         if not calendars:
             raise HandOff("no calendar exposed")
@@ -270,10 +256,7 @@ class HomeActions:
         return self._note(f"{located(request.target)} on {day_named(day, today)}: {note}", answer=True)
 
     async def _change(self, request: decided.ChangeRequest) -> intent.IntentResponse:
-        """When the device last made the asked change, from HA's recorded state history (changes.py).
-
-        The history covers all the days the recorder keeps.
-        """
+        """When the device last made the asked change, from HA's recorded state history (changes.py)."""
         if RECORDER not in self.hass.config.components:
             raise HandOff("changed: HA records no history")
         recorder = get_instance(self.hass)
@@ -300,8 +283,7 @@ class HomeActions:
         """Music Assistant finds the media by name and plays it (music_assistant.play_media).
 
         Its action ignores other players without an error, so a player that is not Music Assistant's hands off first.
-        The note says what the player then plays (playback.py): the action returns before it does, and plays its
-        closest match for a name. Not built: players outside Music Assistant, through HA's own HassMediaSearchAndPlay.
+        The action returns before the player plays, so the note says what it then plays (playback.py).
         """
         player, media = playing.target, playing.media
         entry = er.async_get(self.hass).async_get(player.entity_id)

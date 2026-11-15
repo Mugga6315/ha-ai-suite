@@ -1,11 +1,4 @@
-"""An LLM tool as a record and an async function, and the one adapter that makes it a tool HA can call.
-
-HA's tool list takes `llm.Tool` objects only. Every tool of AI Suite, its own tool sets' and Memory's alike, is a
-`ToolSpec` turned into one by `SpecTool`: the shape of HA's own KNX integration (components/knx/llm_api.py).
-
-A tool answers the model with {"result": ...}, or {"error": ...} for a call it could not answer: the dict the model
-has always seen from these tools.
-"""
+"""An LLM tool as a record and an async function, and the one adapter that makes it a tool HA can call."""
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -21,10 +14,10 @@ from ..const import DOMAIN
 type RecordFailure = Callable[[str, str], Awaitable[None]]
 type ToolArgs = dict[str, Any]
 
-# A failure log line names the call's arguments; a memory's whole text would bury the failure.
+# Characters per argument in a failure log line: a memory's whole text would bury the failure.
 MAX_LOGGED_ARGUMENT = 80
 
-# What a tool that only reads declares: the reply check retries only turns that ran such tools.
+# The reply check retries only turns that ran read-only tools.
 READ_ONLY = llm.ToolAnnotations(read_only=True, destructive=False, idempotent=True, open_world=False)
 READ_ONLY_REMOTE = llm.ToolAnnotations(read_only=True, destructive=False, idempotent=True, open_world=True)
 NOTHING_DECLARED = llm.ToolAnnotations()  # HA's default for a tool that declares nothing
@@ -33,8 +26,7 @@ NOTHING_DECLARED = llm.ToolAnnotations()  # HA's default for a tool that declare
 class ToolError(Exception):
     """A call the tool could not answer; its message goes back to the model as the tool's error.
 
-    `learn`: the call was the model's mistake (a range it got wrong, an entity without statistics). It goes into
-    Memory's failure log when Memory is there, so self-improvement can learn from it.
+    `learn`: the call was the model's mistake; it goes into Memory's failure log when Memory is there.
     """
 
     def __init__(self, message: str, *, learn: bool = False) -> None:
@@ -47,8 +39,7 @@ class ToolError(Exception):
 class ToolSpec[D]:
     """One tool: what the model sees of it, and the function that answers.
 
-    `run` gets the tool's dependency (a client, the store), the validated arguments and the request's context, and
-    returns the answer's text or raises ToolError.
+    `run` gets the tool's dependency and the validated arguments; it returns the answer's text or raises ToolError.
     """
 
     name: str
@@ -93,7 +84,7 @@ def spec_tools[D](specs: tuple[ToolSpec[D], ...], deps: D, record_failure: Recor
 
 
 def _described(args: Mapping[str, Any]) -> str:
-    """The call's arguments as the failure log shows them: `key=value` pairs, each value's repr cut short."""
+    """The call's arguments as the failure log shows them."""
     return " ".join(f"{key}={_short(repr(value))}" for key, value in args.items())
 
 

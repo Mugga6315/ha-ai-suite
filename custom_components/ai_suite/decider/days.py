@@ -1,8 +1,4 @@
-"""The days a request names, from the day words of every language (languages/).
-
-Ahead: today, tomorrow, the day after, the next days, the weekend, a weekday, a weekday of next week. Back: yesterday,
-the day before. No HA imports.
-"""
+"""The days a request names, from the day words of every language (languages/)."""
 
 from datetime import date, timedelta
 import re
@@ -72,11 +68,7 @@ def past_day_asked(text: str, today: date) -> date:
 
 
 def day_named(day: date, today: date) -> str:
-    """A day as a result note names it: its date, with the word for today or a day next to it.
-
-    With the date alone the answer step does not know which day it is: it names today by its weekday as if it were a
-    later day, or says yesterday's total as today's.
-    """
+    """A day as a result note names it: its date, with the word for today or a day next to it."""
     near = _NEAR_DAYS.get((day - today).days)
     return f"{near} ({day:%A %Y-%m-%d})" if near else f"{day:%A %Y-%m-%d}"
 

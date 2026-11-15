@@ -1,10 +1,7 @@
 """A turn's effects: the state changes in the home the turn caused, matched by context.
 
-HA writes a service call's context on each entity the call changes (helpers/service.py) and keeps it there for 5 s
-(CONTEXT_RECENT_TIME_SECONDS, helpers/entity.py). A change under a held turn's context is its own effect; a change
-under a context the turn caused (a script or automation it started, whose context names the turn as parent) is a
-child effect. Derived sensors (a device's power reading) change under their own context and so are not effects.
-How long after the turn's close a change still counts is add_effect's window; a released turn is no longer matched.
+HA writes a service call's context on each entity the call changes (helpers/service.py); derived sensors (a device's
+power reading) change under their own context and so are not effects.
 """
 
 from typing import Literal

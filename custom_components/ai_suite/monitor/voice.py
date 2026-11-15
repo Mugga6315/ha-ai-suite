@@ -1,18 +1,7 @@
 """A turn's voice part: the assist pipeline run that carried it, read from HA's pipeline debug store.
 
-HA keeps the events of the last 10 runs of each pipeline (assist_pipeline/run.py STORED_PIPELINE_RUNS), the same
-events a live run sends. At the turn's open, `find_run` looks for the run whose intent stage is running for the
-turn's conversation; after the turn, `wait_voice` waits for that run's run-end, for the satellite's idle and for
-the answer's playback on the media player of the satellite's device, then turns the events into the record's `voice`
-block (times in ms from run-start).
-
-The satellite's idle is not playback end: an ESPHome satellite goes idle when HA has streamed the answer, before its
-media player starts playing it. The media player's change to `playing` after tts-start is when the first words sound,
-its next change away from `playing` the playback's end.
-
-The store is not public API: KEY_ASSIST_PIPELINE, PipelineData.pipeline_debug, PipelineRunDebug and DATA_CONFIG are
-not in assist_pipeline's `__all__`. Every access to them is in this module and guarded: when HA changes them, turns
-carry no voice part, one warning is logged per HA start, and the rest of the record still ships.
+The store is not public API (not in assist_pipeline's `__all__`): every access is here and guarded, so when HA
+changes it turns carry no voice part, one warning is logged per HA start, and the rest of the record still ships.
 """
 
 import asyncio
@@ -54,7 +43,9 @@ PIPELINE_DOMAIN = "assist_pipeline"
 # What a changed store raises; ValueError: a timestamp no longer in ISO format.
 _STORE_CHANGED = (ImportError, AttributeError, KeyError, TypeError, ValueError)
 _WARNED: HassKey[bool] = HassKey("ai_suite_monitor_voice_store_warned")
-SATELLITE_IDLE = "idle"  # AssistSatelliteState.IDLE: HA marked the satellite idle (not playback end, see above)
+# AssistSatelliteState.IDLE. Not playback end: an ESPHome satellite goes idle once HA has streamed the answer, before
+# its media player plays it.
+SATELLITE_IDLE = "idle"
 MEDIA_PLAYER_DOMAIN = "media_player"
 MEDIA_PLAYING = "playing"  # MediaPlayerState.PLAYING
 
@@ -89,9 +80,8 @@ def find_run(hass: HomeAssistant, conversation_id: str) -> RunRef | None:
 async def wait_voice(hass: HomeAssistant, ref: RunRef, satellite_id: str | None) -> VoicePart | None:
     """The run's voice part once it ended, its satellite went idle and its answer played; None when HA's store changed.
 
-    Waits up to RUN_END_WAIT_SECONDS for run-end and builds from what the run has by then. With a satellite and a
-    tts-start, waits up to IDLE_WAIT_SECONDS after tts-start for the satellite's idle and the playback on its device's
-    media players (null what is not seen).
+    Waits up to RUN_END_WAIT_SECONDS for run-end; with a satellite and a tts-start, up to IDLE_WAIT_SECONDS after
+    tts-start for its idle and the playback on its device's media players (null what is not seen).
     """
     try:
         await _run_end(ref.debug)

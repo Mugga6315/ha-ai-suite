@@ -1,7 +1,4 @@
-"""A turn the text model answers: the agent's tools and prompt in the turn's chat log, the loop, and the reply check.
-
-As an LLM agent of HA does it: the chat log runs the tools and streams the reply.
-"""
+"""A turn the text model answers: the agent's tools and prompt in the turn's chat log, the loop, and the reply check."""
 
 from dataclasses import dataclass
 import logging
@@ -95,11 +92,7 @@ async def _check_reply(
     language: str | None,
     note: TurnNote | None,
 ) -> None:
-    """Check the reply before the user hears it.
-
-    The reply before the user hears it: on a fault the model answers once more, with its tools, told what was
-    wrong; only in a turn that changed nothing, since a retry after an action repeated it (reply_check.py).
-    """
+    """Check the reply before the user hears it; on a fault the model answers once more, told what was wrong."""
     step = recorder.reply_check_opened()
     turn = reply_check.turn_of(chat_log, user_input.text, note.text if note else None)
     checked_language = reply_check.language_of(user_input.text) or language

@@ -1,18 +1,4 @@
-"""History: a sensor's long-term statistics and an entity's state history, read from HA's recorder.
-
-The model is a tool caller, not a data analyst. It picks the tool, the entity, the time range, and whether the user
-asked for a breakdown. Every deterministic decision is made here:
-
-- **Which statistic applies** comes from recorder metadata, not from the model. `state_class: measurement` produces
-  `has_mean` (answer = average/min/max); `total`/`total_increasing` produces `has_sum` (answer = consumption).
-  For a sensor HA sets one of the two, never both (sensor/recorder.py, DEFAULT_STATISTICS).
-- **`sum` is a cumulative counter**, so consumption over a window is a difference, never an addition. We ask HA for
-  `change`, which is that difference computed by the recorder itself.
-- **Row size** (HA's `period`) is derived from the span so a two-year question returns months and a six-hour question
-  returns 5-minute slots. The model never sees or chooses a period.
-- **Answers, not data.** A total is one number. A breakdown is the handful of numbers that *is* the answer. Neither
-  is a dump of recorder rows.
-"""
+"""History: a sensor's long-term statistics and an entity's state history, read from HA's recorder."""
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta
@@ -34,12 +20,10 @@ from .when import BARE_DATE, NAMED_DAYS, fmt_day, parse_when
 
 _LOGGER = logging.getLogger(__name__)
 
-# The History tools may read entities that are not exposed to voice assistants (the set's setting).
 CONF_UNEXPOSED = "unexposed_entities"
 DEFAULT_UNEXPOSED = True
 
-# A breakdown is an answer, so it stays readable. Beyond this many lines the question was really about a coarser unit,
-# and the code coarsens rather than truncating (see _period_for_breakdown).
+# Beyond this many breakdown rows the question was about a coarser unit: coarsen rather than truncate.
 MAX_BREAKDOWN_ROWS = 40
 MAX_HISTORY_ROWS = 40
 
@@ -71,13 +55,14 @@ async def get_statistics(hass: HomeAssistant, unexposed: bool, args: ToolArgs, _
     breakdown = args.get("breakdown", "none")
     span = end - start
     period = _period_for_total(span) if breakdown == "none" else _period_for_breakdown(span, breakdown)
+    # HA gives a sensor has_sum or has_mean, never both (sensor/recorder.py). A sum is a cumulative counter, so a
+    # window's consumption is the recorder's own `change`, never an addition.
     types = {"change"} if has_sum else {"mean", "min", "max"}
     _LOGGER.debug(
         "get_statistics: %s args=%s -> %s .. %s period=%s types=%s", entity_id, args, start, end, period, sorted(types)
     )
-    # Fine-grained rows may simply not exist: HA purges 5-minute statistics with the states, and externally imported
-    # statistics often carry daily rows only. Escalate instead of reporting "no data": a few hours a month back have no
-    # 5-minute rows but hourly ones.
+    # Fine rows may not exist: HA purges 5-minute statistics with the states, and imported statistics often carry daily
+    # rows only. So escalate to coarser rows instead of reporting no data.
     rows: list = []
     used = period
     for candidate in _PERIODS[_PERIODS.index(period):]:
@@ -96,8 +81,7 @@ async def get_statistics(hass: HomeAssistant, unexposed: bool, args: ToolArgs, _
     unit = metadata.get("unit") or ""
     lines = [f"{entity_id} | {_fmt_range(start, end)} local | unit: {unit or 'unknown'}"]
     if coarser:
-        # Say it plainly: coarse rows can reach past the window that was asked for, and an unqualified number would
-        # look exact.
+        # Coarse rows can reach past the asked window, and an unqualified number would look exact.
         lines.append(
             f"note: no data at finer resolution, so this uses whole {period} values, which may extend past the "
             "requested range"
@@ -212,9 +196,8 @@ def _range(args: ToolArgs, calendar_day: bool = False) -> tuple[datetime, dateti
     """The asked window; a ValueError names what is wrong with it."""
     raw_start = (args.get("start") or "").strip()
     whole_day = bool(BARE_DATE.match(raw_start)) or raw_start.lower() in NAMED_DAYS
-    # For consumption, a bare date means that calendar day. Without this, yesterday with no end becomes a rolling 24h
-    # window reaching into today and reports today's figure as yesterday's. History is the opposite: a range from a
-    # past day runs up to now, and a per-day reading made the model walk backwards one day per call.
+    # Consumption: a bare date without end is that calendar day, else yesterday's figure would reach into today.
+    # History: a range from a past day runs up to now, else the model walks back one day per call.
     if calendar_day and whole_day and not args.get("end"):
         start = parse_when(raw_start, dt_util.now())
         end = min(start + timedelta(days=1), dt_util.now())
@@ -227,11 +210,7 @@ def _range(args: ToolArgs, calendar_day: bool = False) -> tuple[datetime, dateti
 
 
 def _end_of(value: str | None) -> datetime:
-    """The range's end; an end that names a day (a bare date or a named day) includes that day, up to now.
-
-    A model asking start=today end=today means today, not an empty range. The Calendar tool reads a date-only end the
-    same way.
-    """
+    """The range's end; an end that names a day (a bare date or a named day) includes that day, up to now."""
     raw = (value or "").strip()
     end = parse_when(raw, dt_util.now())
     if BARE_DATE.match(raw) or raw.lower() in NAMED_DAYS:
@@ -240,11 +219,7 @@ def _end_of(value: str | None) -> datetime:
 
 
 def _period_for_total(span: timedelta) -> str:
-    """Row size used to compute a total the model never sees.
-
-    Rows are only summed here, so the only constraints are that they stay inside the requested range (coarse rows
-    overshoot at the edges) and that the count stays sane. Sub-day precision for short ranges, days otherwise.
-    """
+    """Row size for a total the model never sees: fine enough not to overshoot the range's edges, few enough rows."""
     hours = span.total_seconds() / 3600
     if hours <= 6:
         return "5minute"
@@ -311,12 +286,7 @@ def _fmt(value: float | None) -> str:
 
 
 def _fmt_range(start: datetime, end: datetime) -> str:
-    """Echo the resolved window with weekday names.
-
-    The model computes dates and gets them wrong - for yesterday it may ask for the day before as well. Nothing
-    server-side can tell a wrong day from an intended one, but a weekday in the answer makes the mistake visible to
-    whoever is listening instead of leaving a plausible-looking number.
-    """
+    """Echo the resolved window with weekday names, so a day the model got wrong shows in the answer."""
     fmt = "%Y-%m-%d %H:%M (%a)"
     return f"{dt_util.as_local(start).strftime(fmt)} -> {dt_util.as_local(end).strftime(fmt)}"
 
@@ -324,10 +294,7 @@ def _fmt_range(start: datetime, end: datetime) -> str:
 def _entity(hass: HomeAssistant, given: str, unexposed: bool) -> str:
     """The entity the model means, by its id, name or an alias (home.entity_named).
 
-    The model sends the entity_id most of the time but sometimes the friendly name instead, which then reads as "no
-    statistics" for an entity that has them. `unexposed`: entities not exposed to voice assistants may be read too;
-    external statistic ids (`<source>:<name>`) then pass through, and an unknown name is left to the recorder lookup,
-    which errors honestly. Without it, only exposed entities are read.
+    `unexposed`: unexposed entities may be read, and external statistic ids and unknown names go to the recorder.
     """
     given = (given or "").strip()
     if unexposed and ":" in given and "." not in given:  # external statistic id

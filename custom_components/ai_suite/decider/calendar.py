@@ -1,10 +1,4 @@
-"""Calendar questions.
-
-By day: the entries of the days the text names (days.py). Next or last: the entries coming next, or the most recent
-ones, for a question that asks for those and names none. By name: the decider picks one of the calendars' own
-entries of the coming year, or of the past year for a question about the past. HA's calendar.get_events gives the
-entries (home.read_calendars), the answer step words the facts. No HA imports.
-"""
+"""Calendar questions: the entries of a day, the next or the last ones, or one entry by name."""
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -38,7 +32,7 @@ _LETTERS = re.compile(r"[^\W\d_]+")
 # What a question for the next or the last entries may hold besides those words: words that name nothing.
 _NAMES_NOTHING = merged(lambda language: language.calendar.filler) | merged(lambda language: language.calendar.words)
 # A count the question asks for, by its number word (two to nine): right after the next or last word, or right before
-# an entry word ("my last two appointments", "zwei Termine"). Elsewhere a number word may be a time ("at eight").
+# an entry word. Elsewhere a number word may be a time.
 _NUMBERS = {word: value for language in LANGUAGES.values() for word, value in language.numbers.units.items()}
 _NUMBER = "|".join(sorted(_NUMBERS, key=len, reverse=True))
 _ENTRY_WORDS = "|".join(sorted(merged(lambda language: language.calendar.words), key=len, reverse=True))
@@ -66,18 +60,15 @@ class Event:
 def looks_back(text: str, language: str | None = None) -> bool:
     """Whether the question asks about the past; one asking what comes next does not, whatever else it holds.
 
-    `language`: the request's language tag. Only its past words count: the German "Was" asks what, the English "was"
-    is the past. For a language without a module, every language's past words count.
+    `language`: the request's language tag, whose past words alone count; without a module, every language's count.
     """
     past = _BACK_IN[code] if (code := module_code(language)) else _BACK
     return bool(past.search(text)) and not _NEXT.search(text)
 
 
 def day_facts(events: list[Event], days: list[date], today: date) -> str:
-    """The entries of each asked day, in order, each day after its entries as in `event_fact`.
-
-    With the day first, small answer models answer a question about a day's calendar with the date alone.
-    """
+    """The entries of each asked day, in order, each day after its entries as in `event_fact`."""
+    # With the day first, small answer models answer a question about a day's calendar with the date alone.
     lines = []
     for day in days:
         on_day = sorted((e for e in events if _day(e) == day), key=event_order)
@@ -86,24 +77,16 @@ def day_facts(events: list[Event], days: list[date], today: date) -> str:
 
 
 def coming_next(events: list[Event], text: str) -> list[Event] | None:
-    """The next entries, each name once, for a question for what comes next that names nothing else.
-
-    "What's next on my calendar?" gets ENTRY_COUNT, "my next two appointments" two. Any other word may name an entry,
-    a kind of entry or a time ("the next Visit 1", "next week", "at eight"): the decider takes such a question by
-    name. A recurring entry counts once, or it would fill the list. None for any other question.
-    """
+    """The next entries, each name once, for a question for what comes next that names nothing else; else None."""
     if not _asks_only(text, _NEXT):
         return None
     return _first_of_each(sorted(events, key=event_order))[:_count(text, ENTRY_COUNT)]
 
 
 def last_ones(events: list[Event], text: str, now: datetime) -> list[Event] | None:
-    """The most recent entries that have ended, each name once, for a question for the last one or ones.
+    """The most recent ended entries, each name once, for a question for the last one or ones; else None.
 
-    "What was my last appointment?" gets LAST_COUNT, "my last appointments" ENTRY_COUNT, "my last two appointments"
-    two; naming nothing else (as in `coming_next`). A past verb alone does not ask for them: "Was I at Visit 1?" asks
-    about one, by name. An entry still running (today's all-day one) is no last one. In time order, the most recent
-    last. None for any other question.
+    In time order, the most recent last.
     """
     if not _asks_only(text, _LAST):
         return None
@@ -132,17 +115,15 @@ def event_question(events: list[Event], text: str) -> tuple[dict, dict[str, Even
 
 
 def _asks_only(text: str, asks: re.Pattern[str]) -> bool:
-    """Whether the text has words of `asks` and besides them only words that name nothing.
-
-    A digit may be a time or a year ("my last appointment at 9", "in 2025"): such a question is the decider's.
-    """
+    """Whether the text has words of `asks` and besides them only words that name nothing."""
+    # A digit may be a time or a year: such a question is the decider's.
     if not asks.search(text) or any(char.isdigit() for char in text):
         return False
     return all(word.lower() in _NAMES_NOTHING for word in _LETTERS.findall(asks.sub(" ", _COUNT.sub(" ", text))))
 
 
 def _count(text: str, otherwise: int) -> int:
-    """The number of entries the text asks for by a number word ("my next two appointments"), else `otherwise`."""
+    """The number of entries the text asks for by a number word, else `otherwise`."""
     if (match := _COUNT.search(text)) is None:
         return otherwise
     return _NUMBERS[(match.group("after") or match.group("before")).lower()]

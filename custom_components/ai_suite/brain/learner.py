@@ -1,16 +1,7 @@
 """The self-improver's learning pass: failures.md -> self_improving.md.
 
-The per-turn analyzer writes what went wrong or could be shorter; this reads
-that backlog and turns a *repeated* pattern into a rule the assistant follows
-on every turn. It is the second half of the self-improvement feature, kept
-apart from the librarian: the librarian curates knowledge (wiki, rules.md
-hygiene), this one changes behaviour.
-
-Guardrails, in order of how much they matter:
-  - only a pattern seen twice or more earns a rule,
-  - nothing listed in not_a_defect.md may ever become one (the human's veto),
-  - at most MAX_ADDS rules a run, at most MAX_REMOVES retractions,
-  - rules land in self_improving.md, never in the human-owned rules.md.
+Writes self_improving.md, never the human-owned rules.md: a pattern seen twice or more becomes a rule, nothing in
+not_a_defect.md ever does, at most MAX_ADDS rules and MAX_REMOVES retractions a run.
 """
 import asyncio
 
@@ -141,9 +132,8 @@ class RuleLearner:
                 f"Dropped {unsupported} rule(s) without two matching failures."
             )
 
-        # Caps are the whole safety story here: the rules land in every prompt,
-        # so a confused model must not be able to rewrite the assistant in one
-        # night. Over the cap, nothing is applied at all.
+        # The rules land in every prompt, so a confused model must not rewrite the assistant in one night: over a cap,
+        # nothing is applied at all.
         if len(to_add) > MAX_ADDS:
             raise RunFailed(f"the model asked to add {len(to_add)} rules, at most {MAX_ADDS} are allowed")
         if len(to_remove) > MAX_REMOVES:
@@ -217,13 +207,7 @@ class RuleLearner:
 
 
 def _supported_rules(items: list, failures: str) -> tuple[list[str], int]:
-    """Keep the rules whose evidence is really in the backlog.
-
-    The "two or more entries" bar is what stops one odd turn from becoming a
-    standing rule, and a prompt cannot enforce it: asked for a pattern, a
-    model will present a single entry as one, and a detour seen once becomes
-    a rule. So each rule cites snippets, and they have to match.
-    """
+    """Keep the rules whose evidence is really in the backlog."""
     entries = [line.lower() for line in failures.splitlines() if line.startswith("- ")]
     kept, dropped = [], 0
     for item in items:

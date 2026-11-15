@@ -1,10 +1,6 @@
 """Conversation agent: the decision model first, the text model or a fallback agent for the rest.
 
-Conversation agent: a decision model answers the form (form.decider_form), code acts (home_actions.py); the agent
-loop or a configured fallback agent answers the rest.
-
-The decided and handed-off lines this module logs (INFO, "<entity> decided ..." / "<entity> handoff (...)") are read
-by log tools, so their shape stays.
+The INFO lines "<entity> decided ..." and "<entity> handoff (...)" are read by log tools, so their shape stays.
 """
 
 import asyncio
@@ -237,9 +233,8 @@ class ConversationAgentEntity(conversation.ConversationEntity):
     async def _run_parts(self, turn: _Turn) -> intent.IntentResponse:
         """Decide a message with several requests part by part.
 
-        A message the decider says holds several requests: the answer model splits it into complete single
-        requests (api.SPLIT_SYSTEM_PROMPT), each is decided alone with every check of a single request, and they run
-        one after the other only when all are decided and none overlap; anything else hands off the whole message.
+        The answer model splits it (api.SPLIT_SYSTEM_PROMPT) and each part is decided alone; they run one after the
+        other only when all are decided and none overlap, else the whole message hands off.
         """
         user_input = turn.user_input
         try:
@@ -292,9 +287,8 @@ class ConversationAgentEntity(conversation.ConversationEntity):
     def _with_household_rules(self, turn: _Turn, filled: form.Form, text: str, language: str | None) -> form.Form:
         """The form under the household rule about this kind of request.
 
-        The rule applies whatever the request's words are (a limit, a time, a default room). It is followed by code
-        where its effect is in the decider's terms, else HandOff to the text model, which has the rule
-        (household.follow).
+        The rule applies whatever the request's words are (a limit, a time, a default room). Code follows it where its
+        effect is in the decider's terms, else HandOff to the text model, which has the rule (household.follow).
         """
         device = turn.devices.get(filled.device)
         kind = Platform.LIGHT if filled.room_wide else device.domain if device else None
@@ -310,9 +304,8 @@ class ConversationAgentEntity(conversation.ConversationEntity):
     ) -> conversation.ConversationResult:
         """Hand the request to the fallback agent, or to the agent loop without one.
 
-        Whoever answers is told that a decider passed the request on and why, and the reply language when the
-        decider named it: the loop with the request, so its system prompt stays the same from turn to turn, a
-        fallback agent in the extra system prompt, added to one the request already has.
+        Whoever answers is told why, and the reply language the decider named: the loop with the request, so its
+        system prompt stays the same from turn to turn; a fallback agent in the extra system prompt.
         """
         hand_off = HandOffNote(HAND_OFF_NOTE.format(reason=reason), language)
         if self._decider.fallback_agent is None:
@@ -349,8 +342,7 @@ class ConversationAgentEntity(conversation.ConversationEntity):
     async def _household_rules(self) -> Household:
         """The household's rules as Second Brain compiles them for a decider (async_get_compiled_rules).
 
-        It never reads the files: Second Brain decides what other integrations see. None without memory; a failed read
-        is a rule not compiled, so the turn hands off rather than act against it.
+        No rules without memory; a failed read is a rule not compiled, so the turn hands off rather than act against it.
         """
         brain = self._entry.runtime_data.brain
         if brain is None or not isinstance(brain.api, BrainAPI):
@@ -376,7 +368,6 @@ def _in_language(
 ) -> conversation.ConversationInput:
     """The input in the reply language the decider named, the pipeline's when it named none.
 
-    Results and HA's state words are then in it: in the pipeline's language an English question gets German state words,
-    and the reply follows them into German.
+    Results and HA's state words are then in it: in the pipeline's language, they would pull the reply into that one.
     """
     return replace(user_input, language=language) if language else user_input

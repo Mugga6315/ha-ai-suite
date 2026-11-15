@@ -1,7 +1,7 @@
 """The turn record built from a recorded turn, after the turn and off its path.
 
-Of Home Assistant only its ULID helper is imported: the steps hold HA's objects as the hooks got them (states, intent responses, chat-log
-contents), read here by their attributes. The record is JSON-ready for HA's json_bytes, which the exporter uses.
+Of Home Assistant only its ULID helper is imported: the steps hold HA's objects as the hooks got them (states,
+intent responses, chat-log contents), read here by their attributes.
 """
 
 from collections.abc import Sequence

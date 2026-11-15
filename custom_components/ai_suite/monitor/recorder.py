@@ -1,58 +1,7 @@
 """What a turn did, kept while it runs as references and monotonic stamps; the record is built later (record.py).
 
-No Home Assistant imports: decider/ calls it.
-
-`open_turn` (around `async_process`) puts the turn's TurnTrace into a ContextVar, so the tasks the turn creates (the
-reply-language task, the chat log's tool tasks) record into it too. Every hook is a no-op without an open turn and
-after the turn closed (a task the turn created may outlive it). Hooks keep references and `time.monotonic()` stamps
-only: hashing, JSON and copying happen when the record is built, off the turn's path. A hook that takes a `step` takes
-what its opening hook returned, None included. Times spent in hooks add up in `TurnTrace.hook_ns`.
-
-Turn (conversation.py and its wrapper)
-  open_turn(recorder, start) -> context manager of TurnTrace | None   around async_process; None: not recorded
-                                       (a turn already open in the context: the steps join it; MAX_OPEN_TURNS held)
-  turn_path(path, handoff_reason=None) decided | handoff | loop | error; the last call wins
-  conversation(conversation_id)        the first id given wins: the chat session's before the result's
-  turn_output(speech, continue_conversation)
-  turn_error(stage, err)               errors[]; the same exception given twice is kept once
-Decider (decider/api.py, decider/form.py, llm_client.py)
-  decide_opened(url, state, questions) -> DecideStep | None   DecisionClient.ask, before its request
-  decide_answered(step, answers)       the checked answers by question id
-  bar(qid, value)                      the bar a probability was compared with: set on the newest decide step that
-                                       asked `qid` (one the current task opened first), unless that step has a bar
-                                       for it already
-  answer_step(role, model, url, system, user) -> context manager of AnswerStep | None
-                                       around LLMClient._complete (role answer | split); an exception leaving it is
-                                       the step's error. Only inside it do the next two hooks fill a step.
-  llm_request(body)                    ChatClient._post: the body as sent, after dropped fields
-  llm_response(data)                   ChatClient._post: the parsed JSON answer
-Loop (agent/)
-  system_parts(api_prompt, extra_prompt)  agent/turn.py, after async_provide_llm_data
-  round_opened(call)                   agent/loop.py, the call's keyword arguments, before the request; role round,
-                                       or retry after `retrying`
-  stream_token()                       agent/reply.py, each chunk with reasoning, reply or a tool-call piece; the
-                                       first one stamps the ttft
-  stream_finish(reason)                agent/reply.py, a chunk's finish_reason
-  stream_usage(usage)                  agent/reply.py, a chunk's usage
-  stream_end()                         agent/reply.py, right after the stream's last chunk: the round's end
-  round_content(content)               agent/loop.py, each content the chat log yields for the round
-  round_failed(err)                    agent/loop.py, the round's server error (record the LLMServerError raised for
-                                       it with turn_error("llm", ...))
-  tool_opened(call_id, name, args) -> ToolStep | None   WrappedTool.async_call; parent: the newest round
-  tool_returned(step, result)
-  reply_check_opened() -> ReplyCheckStep | None         agent/turn.py, before the check
-  reply_checked(step, *, language, reply, acted, faults)
-  retrying()                           agent/turn.py, the check asks for the reply again: later rounds are retries
-Actions (home_actions.py)
-  intent_opened(intent, slots, target) -> ActionStep | None   HomeActions._handle_intent
-  service_opened(domain, service, data) -> ActionStep | None  HomeActions._call
-  action_returned(step, result)        the IntentResponse, or the action's response
-Any step
-  step_failed(step, err)               the step's error; ends it
-Effects (the bus listener, outside the turn's context)
-  add_effect(trace, effect)            kept until EFFECTS_WINDOW_SECONDS after the turn closed
-Exporter
-  release(recorder, trace)             the turn is built: no longer held, its context no longer matched
+No Home Assistant imports: decider/ calls it. Hooks are no-ops without an open turn and keep references only:
+hashing, JSON and copying happen when the record is built, off the turn's path.
 """
 
 from collections.abc import Callable, Generator, Iterator, Sequence
@@ -66,8 +15,7 @@ from typing import Any, ClassVar, Concatenate, Literal
 
 from .const import EFFECTS_WINDOW_SECONDS, MAX_OPEN_TURNS
 
-# Steps are mutable: each is created when it opens and filled by later hooks. All hooks run on the event loop, so
-# nothing is shared across threads.
+# Steps are mutable, filled by later hooks; all hooks run on the event loop, so nothing is shared across threads.
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,16 +190,15 @@ _turn: ContextVar[TurnTrace | None] = ContextVar("ai_suite_monitor_turn", defaul
 # The answer step being filled. Task-local apart from the turn: only ChatClient requests inside answer_step fill it,
 # never another job on the same client (Second Brain) in a task that shares the turn.
 _answer: ContextVar[AnswerStep | None] = ContextVar("ai_suite_monitor_answer", default=None)
-# The decide steps the current task opened (a task starts with those of the task that created it). A bar goes to one
-# of them first: the reply-language task and ask_sure both ask `q`, and with both in flight the newest step that
-# asked `q` may be the other task's.
+# The decide steps the current task opened (inherited from the task that created it). A bar goes to one of them
+# first: two tasks in flight may both ask `q`, and the newest step that asked it may be the other task's.
 _own_decides: ContextVar[tuple[DecideStep, ...]] = ContextVar("ai_suite_monitor_own_decides", default=())
 _NOT_RECORDED = nullcontext(None)
 
 
 @contextmanager
 def open_turn(recorder: Recorder, start: TurnStart) -> Generator[TurnTrace | None]:
-    """Record the turn inside; closed on leaving. None: not recorded (see Recorder.skipped), or joined to the open one."""
+    """Record the turn inside; closed on leaving. None: not recorded (see Recorder.skipped) or joined to the open one."""
     if (outer := _turn.get()) is not None and outer.closed is None:
         yield None
         return
@@ -439,7 +386,10 @@ def round_content(trace: TurnTrace, content: Any) -> None:
 
 @_hook
 def round_failed(trace: TurnTrace, err: BaseException) -> None:
-    """The round's request or stream failed."""
+    """The round's request or stream failed.
+
+    The LLMServerError raised for it is recorded separately, with turn_error("llm", ...).
+    """
     if (step := trace.current_round) is not None:
         _fail(step, err)
 

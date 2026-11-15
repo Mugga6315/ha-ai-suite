@@ -1,8 +1,6 @@
 """The exporter of a loaded entry, set up when the entry's options turn it on: nothing exists while they do not.
 
-On: one Recorder for the entry's turns, the effects listener (removed on unload), and the one sender task (the
-entry's background task, cancelled on unload). The options flow's change reloads the entry, so a changed URL, token
-or audio switch comes with a new exporter.
+The options flow's change reloads the entry, so a changed URL, token or audio switch comes with a new exporter.
 """
 
 from collections import deque

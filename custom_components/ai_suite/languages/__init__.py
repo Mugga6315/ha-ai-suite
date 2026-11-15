@@ -1,7 +1,7 @@
 """The languages AI Suite understands: one module each, all filled the same way (words.py).
 
-A request is matched against the words of every language at once, as people mix them (a German request with an
-English title). A new language is one module like de.py and its entry in LANGUAGES. No HA imports.
+A request is matched against every language at once, as people mix them. A new language is one module like de.py and
+its entry in LANGUAGES. No HA imports.
 """
 
 from collections.abc import Callable, Iterable

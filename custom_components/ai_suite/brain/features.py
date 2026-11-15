@@ -1,7 +1,4 @@
-"""Memory's features: the Librarian and Self-improvement, each a subentry a home adds once Memory is there.
-
-Both work on the store, so neither can be added without Memory.
-"""
+"""Memory's features, the Librarian and Self-improvement: subentries that need Memory, since both work on the store."""
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentryFlow
 

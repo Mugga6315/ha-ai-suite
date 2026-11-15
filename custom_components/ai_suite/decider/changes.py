@@ -1,8 +1,4 @@
-"""When a device last changed.
-
-The decider says which change is asked (opened, switched on, locked, ...), the domain table (domains.py) says which
-devices can make it, and the device's recorded state history says when it last happened. No HA imports.
-"""
+"""When a device last changed."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -65,11 +61,7 @@ class LastChange:
 
 
 def can_make(change: str, device: Candidate) -> bool:
-    """Whether the device can make the change.
-
-    Its domain has the change's states, and a binary sensor's device class fits (a door sensor opens, a motion sensor
-    detects).
-    """
+    """Whether the device's domain has the change's states, and a binary sensor's device class fits it."""
     if change == ANY:
         return device.domain in CHANGE_DOMAINS
     if device.domain not in CHANGES[change].states:
@@ -83,9 +75,8 @@ def can_make(change: str, device: Candidate) -> bool:
 def last_change(history: Sequence[tuple[str, datetime | None]], change: str, domain: str) -> LastChange | None:
     """The latest change into the asked states in `history`, with the change after it.
 
-    `history`: (state, since when), newest first; since None is the state the history begins with, not a change. A run
-    of asked states is one change, from the oldest of them: a player that went from on to playing was switched on
-    when it went on. For ANY, the state now and since when. None when the history holds no asked state.
+    `history`: (state, since when), newest first; since None is the state the history begins with, not a change. None
+    when the history holds no asked state.
     """
     changes = _real_changes(history)
     wanted = None if change == ANY else CHANGES[change].states[domain]
@@ -106,10 +97,9 @@ def _run_start(changes: list[tuple[str, datetime | None]], index: int, wanted: f
 
 
 def _real_changes(history: Sequence[tuple[str, datetime | None]]) -> list[tuple[str, datetime | None]]:
-    """The history's changes a user means, newest first.
+    """The history's changes a user means, newest first: no offline or unknown states, a run of one state at its oldest.
 
-    Offline and unknown states are left out, and a run of one state is counted from its oldest entry. Every HA start
-    records each state again: without this, a door closed hours ago "was closed" at the restart.
+    Every HA start records each state again: without this, a door closed hours ago "was closed" at the restart.
     """
     changes: list[tuple[str, datetime | None]] = []
     for state, since in history:
@@ -123,11 +113,8 @@ def _real_changes(history: Sequence[tuple[str, datetime | None]]) -> list[tuple[
 
 
 def change_fact(name: str, change: str, found: LastChange | None, history_start: datetime) -> str:
-    """The result note for the answer step; times in the home's local time, as given.
-
-    A model words a note that no change happened since a day as if the change happened on that day: no change and an
-    unknown time are said so that no date reads as the change's.
-    """
+    """The result note for the answer step; times in the home's local time, as given."""
+    # A model takes a note that nothing changed since a day for a change on that day: no date reads as the change's.
     begins = f"{history_start:%A %Y-%m-%d %H:%M}"
     if found is None:
         done = CHANGES[change].done if change != ANY else "changed"

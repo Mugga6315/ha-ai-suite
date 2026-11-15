@@ -1,7 +1,6 @@
-"""The text model's streamed answer as HA chat-log deltas: the reply, the reasoning beside it, and the tool calls.
+"""The text model's streamed answer as HA chat-log deltas: reply and reasoning as they arrive, tool calls once whole.
 
-HA's chat log speaks the reply while it arrives, so reply text goes out chunk by chunk; tool calls go out once the
-stream is complete, when their arguments are whole.
+HA's chat log speaks the reply while it arrives.
 """
 
 from collections.abc import AsyncGenerator, AsyncIterable
@@ -23,11 +22,7 @@ THINK_OPEN, THINK_CLOSE = "<think>", "</think>"
 async def deltas(
     stream: AsyncIterable[ChatCompletionChunk], strip_emojis: bool
 ) -> AsyncGenerator[conversation.AssistantContentDeltaDict | conversation.ToolResultContentDeltaDict]:
-    """The stream's chunks as chat-log deltas.
-
-    One assistant message from the stream's chunks, then an error result for each tool call whose arguments
-    are no JSON (the model reads it in the next round).
-    """
+    """The stream's chunks as one assistant message, then an error result per tool call whose arguments are no JSON."""
     text, calls = _ReplyText(), _ToolCalls()
     started = False
     async for chunk in stream:
@@ -83,11 +78,7 @@ def _set(
 
 
 class _ReplyText:
-    """Splits the model's text into reasoning and the reply.
-
-    Splits the text the model writes into reasoning (between think tags) and the reply, and drops the reply's
-    leading blank space: a voice reads what it gets, and models often open with line breaks.
-    """
+    """Splits the model's text into reasoning (between think tags) and the reply, without its leading blank space."""
 
     def __init__(self) -> None:
         self._in_think = False
@@ -117,6 +108,7 @@ class _ReplyText:
 
     def _visible(self, reply: str) -> str:
         if not self._reply_started:
+            # A voice reads what it gets, and models often open with line breaks.
             reply = reply.lstrip()
             self._reply_started = bool(reply)
         return reply
@@ -131,11 +123,10 @@ def _partial_tag_length(text: str, tag: str) -> int:
 
 
 class _ToolCalls:
-    """Tool calls streamed in pieces.
+    """Tool calls streamed in pieces: a piece with a new id or a new tool name starts a call, any other continues the last.
 
-    Servers mark a call's pieces differently: llama.cpp sends the id with the first piece only, Ollama gives parallel
-    calls the same index, some OpenRouter engines repeat one id across parallel calls. So a piece with a new id or a new
-    tool name starts a call, and any other piece continues the last one.
+    Not by index or id alone: llama.cpp sends the id with the first piece only, Ollama gives parallel calls one index,
+    some OpenRouter engines repeat one id across parallel calls.
     """
 
     def __init__(self) -> None:

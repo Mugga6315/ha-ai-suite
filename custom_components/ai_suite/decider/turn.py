@@ -1,4 +1,4 @@
-"""What every decided turn shares: the hand-off, its timings, a target as HA intent slots. No HA imports."""
+"""What every decided turn shares: the hand-off, its timings, a target as HA intent slots."""
 
 from dataclasses import dataclass, field
 import time

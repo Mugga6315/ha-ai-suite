@@ -1,8 +1,6 @@
 """Memory while its store is offline (a network share that is down).
 
-The agents keep Memory's API without its tools, with a prompt that says memory is off. The store is looked for again
-only when a turn asks for memory, at most every CHECK_EVERY: no timer, no polling in the background. Once it is found
-again, AI Suite reloads and memory comes up as usual.
+The store is looked for again only when a turn asks for memory, at most every CHECK_EVERY; once found, AI Suite reloads.
 """
 
 import asyncio

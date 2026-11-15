@@ -1,9 +1,4 @@
-"""Tell the user something later, where the request came from: on its voice satellite, else as a notification.
-
-A message said after the turn (a timer that ends, a command that failed, a play that did not start) has no reply to
-go into. On the satellite it was asked on, it is announced (`assist_satellite.announce`). From a chat, a device that
-cannot announce, or an announcement that fails, it becomes a persistent notification: nobody would hear it otherwise.
-"""
+"""Tell the user something after the turn: announced on the request's voice satellite, else as a notification."""
 
 import asyncio
 import logging
@@ -18,7 +13,7 @@ from homeassistant.helpers import entity_registry as er
 _LOGGER = logging.getLogger(__name__)
 
 SATELLITE_DOMAIN = "assist_satellite"
-# A satellite plays one announcement at a time: a second one (two timers ending together) waits this long, once.
+# A satellite plays one announcement at a time: a second one waits this long, once.
 BUSY_RETRY_S = 10
 # An announcement that never ends (a satellite that stops answering) gives way to the notification.
 ANNOUNCE_TIMEOUT_S = 60

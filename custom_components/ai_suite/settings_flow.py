@@ -1,8 +1,4 @@
-"""The add and change dialog of a subentry with one form: a tool set (tools/sets.py) or a Memory feature.
-
-Each such subentry exists once: a second librarian would double the nightly schedule, a second tool set would
-duplicate its tools.
-"""
+"""The add and change dialog of a subentry with one form: a tool set (tools/sets.py) or a Memory feature."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -41,6 +37,7 @@ def settings_flow(form: SettingsForm) -> type[ConfigSubentryFlow]:
             entry = self._get_entry()
             if (reason := form.missing(entry)) is not None:
                 return self.async_abort(reason=reason)
+            # Once only: a second librarian would double the nightly schedule, a second tool set its tools.
             if entry.get_subentries_of_type(form.subentry_type):
                 return self.async_abort(reason="already_configured")
             return await self._form(user_input)

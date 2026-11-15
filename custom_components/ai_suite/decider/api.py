@@ -37,8 +37,7 @@ class DecisionClient:
     async def ask(self, state: str, questions: dict[str, dict]) -> dict[str, dict]:
         """Ask several questions over one state in one request.
 
-        Several questions over one state in one request; the answers by question id, each checked against its
-        question: a choice is one of the question's options, probabilities and yes/no values are numbers.
+        The answers by question id, each checked against its question; DecisionError for an unusable one.
         """
         body = {**self._model, "state": state, "questions": questions}
         step = recorder.decide_opened(self._url, state, questions)
@@ -46,11 +45,8 @@ class DecisionClient:
             try:
                 answers = await self._post(body)
             except aiohttp.ServerDisconnectedError:
-                # Keep-alive race: Node.js servers close idle connections after 5 s, aiohttp (and HA's shared
-                # session) reuses them for 15 s, so a request after 5-15 s idle can go out on a connection the server
-                # already closed. The request only reads, so one retry on a fresh connection is safe.
-                # The race-free alternative is an own session with TCPConnector(force_close=True): a new connection
-                # per request. Not used, to keep HA's shared session.
+                # Keep-alive race: a server may close an idle connection that HA's shared session still reuses. The
+                # request only reads, so one retry on a fresh connection is safe.
                 answers = await self._post(body)
             checked = {qid: _checked(question, answers[qid]) for qid, question in questions.items()}
         except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError) as err:
@@ -91,8 +87,6 @@ def _checked(question: dict, answer: Any) -> dict:
 
 # A list read is longer than one short sentence: a tighter limit cuts a to-do list's read-out mid-word.
 ANSWER_MAX_TOKENS = 160
-# ANSWER_RETRY: a failed wording is tried once more: a model may now and then give no answer within TIMEOUT_SECONDS,
-# and a busy server may refuse a request (429). After the second failure the result sentence stays (conversation.py).
 # The heads of the result notes the code writes for the answer step. The answer prompt explains each, as a tool
 # description would: unexplained, small answer models speak the note as it is, action id and all.
 DONE, NOT_POSSIBLE, NOTHING_TO_DO = "Done", "Not possible", "Nothing to do"
@@ -119,10 +113,8 @@ ANSWER_SYSTEM_PROMPT = (
 WORDING_RULES = ("\nHousehold rules for how replies are worded (follow each one only where it applies to this reply; "
                  "never say the rules themselves): ")
 
-# A message the decider calls several requests is split by the text model into complete single requests, each then
-# decided alone. Splitting is easy even for small models, but they also split exclusions (a group with some devices
-# left out): only the decider decides whether to split (form.decider_form), never this prompt. With only a two-verb
-# example, models return one verb with two devices or two values whole, hence the second example.
+# Small models also split exclusions: only the decider decides whether to split (form.decider_form), never this
+# prompt. The second example: with a two-verb one alone, models return one verb with two devices whole.
 SPLIT_SYSTEM_PROMPT = (
     "You split a message to a smart home assistant into its separate requests. Each request must be complete on its "
     "own: repeat the verb, the room and the value that belong to it, in the user's language and with the user's own "
@@ -162,7 +154,7 @@ class LLMClient(ChatClient):
         prompt = f"User said: {user_text}{reply_in}{wording}\nResult: {result}"
         try:
             return await self._word(prompt)
-        except LLMError as err:  # tried once more (ANSWER_RETRY)
+        except LLMError as err:  # once more: a model may answer too late, a busy server may refuse (429)
             _LOGGER.warning("answer LLM failed, trying once more: %s", err)
         return await self._word(prompt)
 
@@ -197,8 +189,5 @@ class LLMClient(ChatClient):
 
 
 def _requests_of(split: Any) -> Any:
-    """The parts of a split: the schema's object, or the bare array of the prompt's examples.
-
-    A server that ignores the schema (no structured output for that model) returns the array the examples show.
-    """
+    """The parts of a split: the schema's object, or the bare array of a server that ignores the schema."""
     return split if isinstance(split, list) else split["requests"]

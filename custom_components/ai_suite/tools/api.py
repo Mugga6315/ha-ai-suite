@@ -1,8 +1,4 @@
-"""AI Suite's LLM API: the tools of every tool set the entry has, for any conversation agent that selects it.
-
-The tools need nothing but HA. With Memory there, a call the model got wrong also goes into Memory's failure log
-(`record_failure`), so self-improvement learns from it.
-"""
+"""AI Suite's LLM API: the tools of every tool set the entry has, for any conversation agent that selects it."""
 
 import logging
 
@@ -17,8 +13,7 @@ from .spec import RecordFailure
 
 _LOGGER = logging.getLogger(__name__)
 
-# What a home ticks under an agent's LLM APIs. HA's own merge, used by other integrations' agents, prefixes each tool
-# with the API's slugged name; AI Suite's agents give the model the tool's own name.
+# Other integrations' agents (HA's own merge) prefix each tool with the API's slugged name; AI Suite's agents do not.
 TOOLS_API_ID = DOMAIN
 TOOLS_API_NAME = "AI Suite"
 

@@ -1,8 +1,4 @@
-"""What passes between the exporter's parts: the voice part, the audio clips and the built record.
-
-No Home Assistant imports. voice.py makes a VoicePart, audio.py the AudioClips, record.py the BuiltTurn from them and
-the recorder's TurnTrace, exporter.py sends the BuiltTurn.
-"""
+"""What passes between the exporter's parts: the voice part, the audio clips and the built record."""
 
 from dataclasses import dataclass
 from pathlib import Path

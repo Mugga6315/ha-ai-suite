@@ -1,8 +1,4 @@
-"""Single chat-completions requests to the LLM server: everything but the agent loop.
-
-The answer model, the rule compiler and Second Brain's background jobs all go through ChatClient, so the server's
-settings (the thinking switch) and its quirks (fields it rejects) are handled in one place.
-"""
+"""Single chat-completions requests to the LLM server: everything but the agent loop."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -23,8 +19,7 @@ from .const import (
 from .monitor import recorder
 
 _LOGGER = logging.getLogger(__name__)
-# Statuses that say the server does not take a field of the request. Others (401, 404, 429) say nothing about the
-# fields, so they never drop one.
+# Statuses that say the server does not take a field of the request; others (401, 404, 429) never drop one.
 FIELD_REJECTED = (400, 422)
 # Optional fields by group, dropped in this order when the server rejects a request that has them.
 _OPTIONAL = {"json": ("response_format",), "thinking": ("reasoning_effort", "chat_template_kwargs")}

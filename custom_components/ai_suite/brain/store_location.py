@@ -1,9 +1,6 @@
-"""Where the store may live.
+"""Where the store may live: never in a folder Home Assistant owns.
 
-The store seeds files and runs `git init` in whatever folder it is given, so a
-folder Home Assistant owns is not a valid choice: pointed at the config dir it
-commits `.storage/auth` and `secrets.yaml` into a git repo. Both the config
-flow and setup check through here.
+The store seeds files and runs `git init` there; in the config dir it would commit `.storage/auth` and `secrets.yaml`.
 """
 import os
 from pathlib import Path
@@ -12,11 +9,7 @@ from .const import STORE_FOLDER
 
 
 def default_store_location(hass) -> str:
-    """The store's own folder next to the HA config — created on first setup.
-
-    Not inside `custom_components`: an integration update replaces the
-    integration's directory, and the store would go with it.
-    """
+    """The store's own folder next to the HA config, created on first setup."""
     return hass.config.path(STORE_FOLDER)
 
 

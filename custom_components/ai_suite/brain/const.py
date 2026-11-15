@@ -41,9 +41,8 @@ DEFAULT_CONSOLIDATE_TIME = "03:00"
 # After the librarian's run: the two passes touch the same store and there is no
 # reason for them to queue behind each other's lock.
 DEFAULT_LEARN_TIME = "03:30"
-# Thinking effort for the background LLM calls (consolidator triage, turn
-# analyzer). They reason with nobody waiting, so effort is affordable there.
-# NO_THINKING turns thinking off. Values map to reasoning_effort.
+# Thinking effort of the background calls: nobody waits for them, so effort is affordable.
+# NO_THINKING turns thinking off; the other values map to reasoning_effort.
 NO_THINKING = "none"
 SELF_IMPROVE_EFFORTS = [NO_THINKING, "low", "medium", "high", "xhigh"]
 DEFAULT_SELF_IMPROVE_EFFORT = "high"

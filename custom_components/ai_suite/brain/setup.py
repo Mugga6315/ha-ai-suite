@@ -1,8 +1,7 @@
 """Second Brain inside AI Suite: the store, its LLM API and its background jobs, set up from the Memory subentry.
 
-Settings come from the Memory subentry. A store that cannot be used turns memory off alone (a repair issue says why),
-so the conversation agents of the same entry keep working. An offline store is looked for again when a turn needs
-memory (waiting.py) instead of having HA retry the whole entry.
+A store that cannot be used turns memory off alone, with a repair issue, so the entry's agents keep working; an
+offline one is looked for again when a turn needs memory (waiting.py) instead of HA retrying the whole entry.
 """
 
 from collections.abc import Callable, Coroutine
@@ -102,11 +101,7 @@ def _resolved(path: str) -> Path:
 
 
 async def _offline(memory: ConfigSubentry, store: Store) -> bool:
-    """The store was set up here before and is gone now: a share offline, not an empty folder to seed.
-
-    Moving the store to a new location is a deliberate act and is allowed to seed; "initialized_path" is where it was
-    last set up.
-    """
+    """The store was set up here before and is gone now: a share offline, not an empty folder to seed."""
     return (
         bool(memory.data.get("initialized"))
         and str(store.root) == memory.data.get("initialized_path")
@@ -142,11 +137,7 @@ def _record_store_initialized(hass: HomeAssistant, entry: ConfigEntry, memory: C
 
 
 def _check_setup_gaps(hass: HomeAssistant) -> None:
-    """Raise a repair issue while no conversation agent uses memory.
-
-    Memory then loads and does nothing; it is one click from working and produces no error, so a repair issue says it.
-    """
-    # No conversation agent has ticked "Second Brain": the API is registered and never asked for a tool.
+    """Raise a repair issue while no conversation agent uses memory."""
     selected = any(
         BRAIN_API_ID in (sub.data.get("llm_hass_api") or [])
         for other in hass.config_entries.async_entries()
@@ -171,11 +162,7 @@ def _hour_minute(value: str) -> tuple[int, int]:
 
 
 def _setup_self_improvement(hass: HomeAssistant, entry: ConfigEntry, store: Store) -> RuleLearner | None:
-    """The per-turn review and the nightly pass that turns its notes into rules, if the feature is added.
-
-    Its own subentry, not the librarian's: the librarian is one LLM call a night, the review one per turn, so they
-    are worth adding and removing separately. The pass owns failures.md end to end, so it lives here too.
-    """
+    """The per-turn review and the nightly pass that turns its notes into rules, if the feature is added."""
     subentry = subentry_of(entry, SUBENTRY_SELF_IMPROVE)
     if subentry is None or (client := background_client(hass, entry)) is None:
         return None

@@ -1,21 +1,6 @@
-"""Per-turn self-improvement analyzer.
+"""Per-turn self-improvement analyzer: reviews each finished turn and notes a misfire or a detour in failures.md.
 
-Runs in the background after each assist turn that used this integration. It
-reviews the turn (thinking effort configurable) and, when it finds a misfire,
-appends one line to failures.md - the same input the nightly learner turns into
-a rule. It never blocks the assist path and never writes a rule itself; that
-judgement (does a repeated pattern deserve a rule) stays with the learner.
-
-Signal it looks for, all decidable from the turn alone:
-  - redundant/unused tool calls (efficiency),
-  - denied-but-present: an answer says a device is missing while it is exposed,
-  - over-broad action: a whole area toggled when one device was named AND the
-    area holds more than one matching device,
-  - rule adherence: a violation of an active rule,
-  - language: an answer in a different language than the question,
-  - detour: the answer was right but took more calls than the task needs, and
-    the shorter path can be named. This is what makes the assistant faster over
-    time, not only more correct.
+Runs in the background, never blocks the assist path and never writes a rule; that judgement stays with the learner.
 """
 import asyncio
 import json
@@ -52,10 +37,8 @@ _MARKER = PROMPT_MARKER
 _SYSTEM_CONTENT_LIMIT = 8000
 _LLM_TIMEOUT_SECONDS = 120
 
-# Quiet time after the last chat-log event before the turn is read, and how many
-# times that read may be retried while the turn is still running. Long on
-# purpose: the review has nobody waiting for it, and a late read is a complete
-# turn, while an early one is a turn read twice.
+# Quiet time after the last chat-log event before the turn is read, and the reads of a still running turn. Long on
+# purpose: nobody waits for the review, and a late read is a complete turn while an early one reads it twice.
 SETTLE_SECONDS = 45
 MAX_READS = 6
 
@@ -96,12 +79,7 @@ def _tool_call_fields(tc: object) -> tuple[str, object] | None:
 
 
 def is_our_turn(content: list[dict]) -> bool:
-    """Did this conversation use our API? Read from the injected system prompt.
-
-    Separate from summarize_turn because the two "no" answers differ: a turn
-    that is not ours will never become ours, while an unfinished turn is worth
-    reading again.
-    """
+    """Did this conversation use our API? Read from the injected system prompt."""
     system = next(
         (c.get("content", "") for c in content if c.get("role") == "system"), ""
     )
@@ -122,7 +100,7 @@ def summarize_turn(content: list[dict]) -> dict | None:
         return None
     last = content[-1]
     if last.get("role") != "assistant" or not last.get("content"):
-        return None  # turn not finished with a spoken answer
+        return None
     if last.get("tool_calls"):
         return None  # spoke, but is still calling tools — not the final answer
 
@@ -166,8 +144,7 @@ class TurnAnalyzer:
         # One review at a time: reviews queue behind each other instead of
         # competing with the assistant itself for the LLM endpoint's slots.
         self._running = asyncio.Lock()
-        # conversation_id -> answers already analyzed, so a multi-turn chat does
-        # not re-analyze earlier turns.
+        # conversation_id -> answers already analyzed, so a multi-turn chat does not re-analyze earlier turns.
         self._seen: dict[str, int] = {}
         # conversation_id -> the pending settle timer's cancel callback.
         self._pending: dict[str, CALLBACK_TYPE] = {}
@@ -176,13 +153,8 @@ class TurnAnalyzer:
     def on_chat_log(self, conversation_id: str, event_type, data: dict) -> None:
         """Chat-log subscriber. Never raises into HA's conversation path.
 
-        The events are only a wake-up: HA emits no event for the assistant's
-        final answer when the agent streams it (`async_add_assistant_content`
-        appends without notifying), so the turn is read from the live chat log
-        once the events stop coming.
-
-        TODO: a workaround for HA's behaviour as checked in HA 2026.10. Check it again
-        on HA updates; once HA notifies for the final answer, read it from the event.
+        HA emits no event for a streamed final answer, so events only wake a read of the live chat log once they stop.
+        TODO: HA's behaviour as of 2026.10; check on HA updates, and once HA notifies for it, read it from the event.
         """
         try:
             if not data:  # DELETED: the conversation is over
@@ -229,12 +201,12 @@ class TurnAnalyzer:
         if not is_our_turn(content):
             return  # another agent's conversation - nothing to wait for
         turn = summarize_turn(content)
-        if turn is None:  # still mid-turn — wait for it to finish
+        if turn is None:
             if attempt + 1 < MAX_READS:
                 self._schedule_read(conversation_id, attempt + 1)
             return
         if self._seen.get(conversation_id, 0) >= turn["n_answers"]:
-            return  # already analyzed this turn
+            return
         self._seen[conversation_id] = turn["n_answers"]
         # Owned by the entry: an unload cancels a review still running, so none writes to the store after it.
         self._entry.async_create_background_task(self._hass, self._analyze(turn), "ai_suite_turn_review")
@@ -282,16 +254,8 @@ class TurnAnalyzer:
         )
 
 
-# --- seams: the feature's subentry interface (see features.py) ----------------
-
-
 def subentry_schema(data: dict) -> dict:
-    """The fields of the self-improvement subentry form.
-
-    The feature is on because the subentry exists — removing it is the off
-    switch, as for every other feature. What is left to choose is how hard the
-    review thinks, and when the nightly pass turns the notes into rules.
-    """
+    """The fields of the self-improvement subentry form."""
     return {
         probatio.Required(
             CONF_SELF_IMPROVE_EFFORT,

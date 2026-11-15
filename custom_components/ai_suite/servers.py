@@ -32,11 +32,7 @@ async def list_models(session: aiohttp.ClientSession, base_url: str) -> list[str
 
 
 async def list_decision_models(session: aiohttp.ClientSession, base_url: str) -> list[str]:
-    """The models a decision server offers.
-
-    Those are the ones marked as decision models (output `decisions`, as llama-server and llama-swap report them), or
-    every listed model when the server marks none.
-    """
+    """The models a decision server marks with output `decisions` (llama-server, llama-swap), else all it lists."""
     models = await _listed_models(session, base_url)
     marked = [model for model in models if "decisions" in _output_modalities(model)]
     return sorted(model["id"] for model in marked or models)

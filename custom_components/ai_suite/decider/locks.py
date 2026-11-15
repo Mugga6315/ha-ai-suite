@@ -1,8 +1,6 @@
 """Whether a text says to lock or to unlock, by its words.
 
-Locking is a closed set of words that carry their direction, and a wrong answer or action is a security fact: a
-decider may take a word for locked as closed with high confidence, or lock the door for an unlock command whose verb
-is split, whatever its options say. Only the languages with a module (languages/). No HA imports.
+Only the languages with a module (languages/).
 """
 
 import re

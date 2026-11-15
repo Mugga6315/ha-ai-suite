@@ -1,10 +1,4 @@
-"""The Timers sensor: every running timer and command for later, for dashboards and wall displays.
-
-Its state is how many there are; the attribute `entries` lists each, the next one first: id, kind (timer or command),
-name, when it was set and when it ends (ISO, UTC), its length in seconds, the area of the device it was set on, and a
-command's tool and arguments. A display counts down from `ends_at` itself: the sensor changes only when an entry is
-added, cancelled or done. The list is left out of the recorder's history.
-"""
+"""The Timers sensor: every running timer and command for later, for dashboards and wall displays."""
 
 from typing import Any
 

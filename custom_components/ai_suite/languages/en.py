@@ -46,6 +46,9 @@ LANGUAGE = Language(
         window=r"last|past|next|coming",
         time_units=r"seconds?|minutes?|hours?|days?|weeks?|months?|years?",
         clock=r"am|pm|a\.m\.|p\.m\.|o'clock",
+        day_suffix=r"st|nd|rd|th",
+        day_month_link=r"of",
+        months=r"january|february|march|april|may|june|july|august|september|october|november|december",
     ),
     calendar=Calendar(
         next_up=r"\bnext\b|\bupcoming\b|\bcoming up\b",

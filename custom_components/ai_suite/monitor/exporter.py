@@ -1,11 +1,7 @@
 """The sender: built records posted to the trace monitor's ingest API one at a time, then their STT audio.
 
-`submit` queues a record from the event loop; `run` is the one sender task (the entry's background task). The sender
-takes the oldest record and finishes it before the next: a request the monitor cannot take now (no connection,
-timeout, 5xx, 429) is tried again after a doubling pause, up to SEND_TRIES times, then the record is dropped; a
-status another try will not change (any other 4xx) drops the record, or the one clip, at once; so does a record
-JSON cannot express. A blob is sent until a
-record carrying it was accepted. A run folder is deleted once each of its clips was accepted.
+No connection, a timeout, 5xx or 429 retry the delivery after a doubling pause, up to SEND_TRIES times; any other 4xx
+drops the record (or the one clip) at once, as does a record JSON cannot express.
 """
 
 from asyncio import Event, sleep

@@ -1,8 +1,4 @@
-"""A filled form checked and turned into what code does.
-
-The result is an HA intent on a device or a room, a read, a play, a list, forecast, calendar, past-value or last-change
-request, or what the home lacks. Every check a rule can make is made here; one that fails hands off. No HA imports.
-"""
+"""A filled form checked and turned into what code does."""
 
 from dataclasses import dataclass, replace
 import re
@@ -58,9 +54,8 @@ QUANTITIES = {
     ),
     "humidity": pattern(lambda language: language.reads.humidity),
 }
-# Quantities a home's devices measure wherever they are, not per room (such a device usually has no area): a read
-# naming one that no device of the home measures is answered as missing; handed off, a text model may make a value
-# up (a battery level in a home without a battery).
+# Quantities measured home-wide, not per room: a read naming one that no device of the home measures is answered as
+# missing; handed off, a text model may make a value up.
 HOME_QUANTITIES = {
     "battery": pattern(lambda language: language.reads.battery),
 }
@@ -169,9 +164,8 @@ def command(
 ) -> Result:
     """What code does for the form, or HandOff when a rule says the decision path must not act.
 
-    The HA intent, the read, the playing or what is missing for what the form asks, or HandOff when a rule says
-    the decision path must not act. `here` is the area of the voice satellite the request came from, if any;
-    `previous`: the conversation's previous exchange (decision.previous_turn), None on its first turn.
+    `here`: the area of the voice satellite the request came from, if any; `previous`: the conversation's previous
+    exchange (decision.previous_turn), None on its first turn.
     """
     if (request := _request_without_device(form)) is not None:
         return request
@@ -233,11 +227,7 @@ def _play_request(form: Form, devices: dict[str, Candidate], text: str, here: st
 def _quantity_read(
     form: Form, devices: dict[str, Candidate], text: str, here: str | None, previous: str | None
 ) -> Reading | Missing | None:
-    """A read of a quantity in a place.
-
-    The place is the named room, a follow-up's room or the satellite's area; Missing when no device of the home
-    measures the quantity. None for a read of one device.
-    """
+    """A read of a quantity in the named room, a follow-up's room or the satellite's area; None for one device's."""
     if form.room != NO_ROOM and (quantity := _quantity_in(text) or _followed(text, previous)):
         return _read_in_room(form, quantity, devices, text)
     if here is not None and (quantity := _here_asked(form, devices, text, here)):
@@ -285,11 +275,7 @@ def _device_command(form: Form, picked: Candidate, devices: dict[str, Candidate]
 
 
 def parts_overlap(results: list[object]) -> bool:
-    """Whether two parts of one message act on the same device.
-
-    That is the same entity twice, or a room's lights beside one of its lights. Parts that overlap may undo each other,
-    or be an exclusion the decider took for two requests (all lights off, one of them left on).
-    """
+    """Whether two parts of one message act on the same device, or on a room's lights and one of its lights."""
     targets = [target for result in results if (target := getattr(result, "target", None)) is not None]
     entities = [t.entity_id for t in targets if isinstance(t, Candidate)]
     groups = [t for t in targets if isinstance(t, RoomGroup)]
@@ -301,10 +287,8 @@ def parts_overlap(results: list[object]) -> bool:
 def _past_request(
     form: Form, devices: dict[str, Candidate], text: str, here: str | None
 ) -> PastRequest | Missing:
-    """The sensor whose earlier value is asked.
-
-    It is one sensor, in the named room (else the satellite's), that measures what the question names.
-    """
+    """The sensor whose earlier value is asked, in the named room (else the satellite's)."""
+    # Checked first: handed off, the text model gives another room's values as this room's.
     if unmeasured := _unmeasured(form, devices, text, here):
         return unmeasured
     statistic = _statistic_asked(form, text)
@@ -326,11 +310,7 @@ def _past_request(
 
 
 def _statistic_asked(form: Form, text: str) -> str:
-    """The earlier value the question asks for.
-
-    The earlier value the decider names; with none, a day's average, lowest and highest (past.DAY) when the
-    question asks how a quantity was, not when. Otherwise HandOff.
-    """
+    """The earlier value the decider names, else past.DAY when the question asks how a quantity was; else HandOff."""
     if form.statistic not in (None, NO_STATISTIC):
         return form.statistic
     if _quantity_in(text) and not _WHEN.search(text):
@@ -339,11 +319,8 @@ def _statistic_asked(form: Form, text: str) -> str:
 
 
 def _lock_as_said(action: str, target: Candidate, text: str) -> None:
-    """HandOff unless an action on a lock is the one the text's lock words say (locks.py).
-
-    A decider may lock the door for a German unlock command whose verb is split; closing a door means locking it to
-    some people and not to others, so the request decides, not the decider.
-    """
+    """HandOff unless an action on a lock is the one the text's lock words say (locks.py)."""
+    # A decider may lock the door for an unlock command; a lock shuts some people out, so the words decide.
     if target.domain != "lock":
         return
     said = lock_action(text)
@@ -352,13 +329,8 @@ def _lock_as_said(action: str, target: Candidate, text: str) -> None:
 
 
 def _lock_read_from_lock(target: Candidate, text: str) -> None:
-    """Hand off a question in lock words that a device other than a lock would answer.
-
-    HandOff when a question in lock words (locks.py) would be answered by a device that is no lock: a decider may
-    pick another device's sensor for a question whether a door is locked, and that sensor's "off" is worded as not
-    locked. Handed off, not declined: a home may hold its lock as another kind of entity, which the text model
-    can still find.
-    """
+    """Hand off a question in lock words that a device other than a lock would answer."""
+    # Handed off, not declined: a home may hold its lock as another kind of entity, which the text model can find.
     if target.domain != "lock" and lock_direction(text) is not None:
         raise HandOff(f"{target.entity_id} is no lock, the question asks whether one is locked")
 
@@ -366,10 +338,7 @@ def _lock_read_from_lock(target: Candidate, text: str) -> None:
 def _change_request(
     form: Form, devices: dict[str, Candidate], text: str, here: str | None
 ) -> ChangeRequest | Missing:
-    """The device whose last change is asked.
-
-    It is the decider's sure pick, in the named room (else the satellite's), able to make the change.
-    """
+    """The device whose last change is asked: the decider's pick, in the named room (else the satellite's)."""
     if form.change is None or form.device == NO_DEVICE:
         raise HandOff("changed: no device")
     picked = _at_satellite(devices[form.device], devices, text, here, form.room)
@@ -392,15 +361,7 @@ def _room_command(form: Form) -> Command:
 
 
 def _means_the_rooms_lights(form: Form, devices: dict[str, Candidate], text: str, here: str | None) -> bool:
-    """Whether a light request means every light of the room it names.
-
-    It does when the room has several, and the text names no light and no kind of light, as HA's own sentences have it.
-    The room's lights are those HA's area intent picks, by the registry's areas: a light without a room, or with the
-    room only in its name, is not one of them. The room is the decider's, with a room word in the request or the
-    user's turn before (not checked to be a word for that room) and the decider sure of it at the run-off bar
-    (form.py, room_named and room_clear), or the satellite's own (`here`) when the user names no other, as in HA's own
-    satellite sentences.
-    """
+    """Whether a light request means every light of the room it names, or of the satellite's own room."""
     stated = form.room_named and form.room_clear
     own = here is not None and form.room == here and (form.room_clear or not form.room_named)
     return (form.action in ROOM_ACTIONS and form.room not in (NO_ROOM, OTHER_ROOM) and (stated or own)
@@ -410,11 +371,7 @@ def _means_the_rooms_lights(form: Form, devices: dict[str, Candidate], text: str
 
 
 def _one_light_named(form: Form, devices: dict[str, Candidate], text: str) -> None:
-    """Hand off when one of several lights would be switched without the text naming it.
-
-    HandOff when one light of several in the named room would be switched without the text naming it: the
-    decider's guess could be the wrong lamp, and a wrong action weighs more than a question back.
-    """
+    """Hand off when one of several lights in the named room would be switched without the text naming it."""
     picked = devices.get(form.device)
     if (form.action in ROOM_ACTIONS and picked is not None and picked.domain == "light"
             and form.room not in (NO_ROOM, OTHER_ROOM) and lights_in(devices, form.room) > 1
@@ -429,22 +386,14 @@ def _quantity_in(text: str) -> str | None:
 
 
 def _followed(text: str, previous: str | None) -> str | None:
-    """The quantity of the previous exchange, for a follow-up that names only a room.
-
-    Such a follow-up asks for another room after one room's temperature. The quantity is the previous question's, or the
-    reply's when that question was a follow-up too. None for none or several, and for a text that is no follow-up.
-    """
+    """The quantity of the previous exchange, for a follow-up that names only a room; None for none or several."""
     if previous is None or not _FOLLOW_UP.search(text):
         return None
     return _quantity_in(previous)
 
 
 def _here_asked(form: Form, devices: dict[str, Candidate], text: str, here: str | None) -> str | None:
-    """The quantity a satellite request asks about where it is.
-
-    The quantity of a place a satellite request asks about where it is: no room, no device named, not outdoors,
-    no follow-up. Else a question about the satellite's own room may read another room's sensor.
-    """
+    """The quantity a satellite request asks about where it is."""
     picked = devices.get(form.device)
     if here is None or form.room != NO_ROOM or _OUTDOOR.search(text) or _FOLLOW_UP.search(text):
         return None
@@ -454,13 +403,7 @@ def _here_asked(form: Form, devices: dict[str, Candidate], text: str, here: str 
 
 
 def _unmeasured(form: Form, devices: dict[str, Candidate], text: str, here: str | None) -> Missing | None:
-    """Missing when the place a quantity is asked of has no device measuring it.
-
-    Missing when the place a quantity is asked of (the named room, else the satellite's, as for a current read)
-    has no device measuring it. Checked before what the past question asks: a question how a quantity was in the
-    satellite's room, asked where no device measures it, names no statistic, and the text model, handed it, gives
-    another room's values as this room's.
-    """
+    """Missing when the named room, else the satellite's, has no device measuring the quantity asked of it."""
     place: str | None
     if form.room != NO_ROOM and (quantity := _quantity_in(text)):
         place = form.room
@@ -482,10 +425,9 @@ def _unmeasured_in_home(devices: dict[str, Candidate], text: str) -> Missing | N
 
 
 def _read_in_room(form: Form, quantity: str, devices: dict[str, Candidate], text: str) -> Reading | Missing:
-    """A quantity in a named room, read from the room's device that measures it.
+    """A quantity in a named room, read from the decider's pick among the devices measuring it, else the only one.
 
-    That is the decider's pick when it is one of them, else the only one. None there: Missing; several and no pick among
-    them: HandOff.
+    Missing when there is none; HandOff for several and no pick among them.
     """
     _one_device_now(text)
     fitting = [d for d in devices.values() if d.area == form.room and _measures(d, quantity)]
@@ -498,33 +440,26 @@ def _read_in_room(form: Form, quantity: str, devices: dict[str, Candidate], text
 
 
 def _missing_capable(form: Form, devices: dict[str, Candidate], text: str) -> Missing:
-    """Missing when the named room has no device that could do the action.
-
-    No device picked for an action in a named room: Missing when the room has none that could do it, and the text
-    names no device without a room that could: such a device may be anywhere (a request naming it with a room must
-    not be answered as no device in that room).
-    """
+    """Missing when the named room has no device that could do the action; HandOff otherwise."""
     action = ACTIONS[form.action]
     if form.room == NO_ROOM or any(d.area == form.room and d.domain in action.domains for d in devices.values()):
         raise HandOff(f"form {form.action}: no device")
+    # A device without a room may be anywhere: a request naming it with a room lacks no device.
     if any(d.area is None and d.domain in action.domains and names(d, text) for d in devices.values()):
         raise HandOff(f"form {form.action}: the text names a device without a room")
     return Missing(f"there is no device in {form.room} that can {action.description}")
 
 
 def _player(form: Form, devices: dict[str, Candidate], text: str, here: str | None) -> Candidate | Missing:
-    """The player to play on.
+    """The player to play on: the one named, else the only player in the named room or else the satellite's area.
 
-    That is the one the request names, else the only player in the named room or, without one, in the satellite's area
-    (as HA's own search-and-play does). Several or none there: HandOff, or Missing when the decider's pick is in another
-    room than the satellite's.
+    HandOff for several or none there; Missing when the decider's pick is in another room than the satellite's.
     """
     if form.device != NO_DEVICE:
         picked = devices[form.device]
         unplaced = form.room == NO_ROOM and here is None and not named_only_by(picked, devices, text)
         if unplaced and sum(d.domain in MEDIA_DOMAINS for d in devices.values()) > 1:
-            # A typed play request with several players: the decider's pick is a guess. No room, no satellite and
-            # no player named leaves the player open.
+            # A typed play request with several players: the decider's pick is a guess.
             raise HandOff("several players, the request places none")
         local = _at_satellite(picked, devices, text, here, form.room)
         if isinstance(local, Missing):
@@ -543,12 +478,9 @@ def _player(form: Form, devices: dict[str, Candidate], text: str, here: str | No
 def _at_satellite(
     picked: Candidate, devices: dict[str, Candidate], text: str, here: str | None, room: str
 ) -> Candidate | Missing:
-    """The device of the picked kind in the satellite's area.
+    """The device of the picked kind in the satellite's area, for a request naming neither a room nor the device.
 
-    Spoken to a satellite, naming neither a room nor the device: the device of the picked kind in the satellite's
-    area, as HA's own prompt says ("You are in area ..."). Several of that kind there: HandOff. None there: Missing
-    when the pick is in another room, never the pick as the one asked: a question about the satellite's own room must
-    not read another room's sensor. A pick without an area stands: it may be anywhere.
+    HandOff for several there; Missing for none there and the pick in another room.
     """
     if here is None or room != NO_ROOM or picked.area == here or named_only_by(picked, devices, text):
         return picked
@@ -558,41 +490,32 @@ def _at_satellite(
         raise HandOff(f"several {picked.domain} devices in {here}, the satellite's area")
     if local:
         return local[0]
-    if picked.area is None:
+    if picked.area is None:  # it may be anywhere
         return picked
     return Missing(f"there is no device like {picked.name} in {here}, where the user is; {picked.name} is in "
                    f"{picked.area}")
 
 
 def _light_if_asked(target: Candidate, text: str) -> Candidate:
-    """A request for a light acts on a light, or on a switch named as one.
-
-    Else a decider may switch on another switch named after the room a compound light word names.
-    """
+    """A request for a light acts on a light, or on a switch named as one."""
+    # Else a decider may switch on another switch named after the room a compound light word names.
     if LIGHT_WORDS.search(text) and not is_a_light(target):
         raise HandOff(f"the user asks for a light, {target.entity_id} is none")
     return target
 
 
 def _in_room(target: Candidate, room: str, devices: dict[str, Candidate], text: str) -> Candidate:
-    """The target, when the room the request names allows it.
-
-    The target when the request names no room or the target is in it, or when the target has no room and the
-    text names it by a name only it has: an area is not mandatory in HA, and a room word cannot place such a device.
-    """
+    """The target, when the room the request names allows it; HandOff otherwise."""
     if room in (NO_ROOM, target.area):
         return target
+    # An area is not mandatory in HA, and a room word cannot place such a device.
     if target.area is None and named_only_by(target, devices, text):
         return target
     raise HandOff(f"{target.entity_id} is not in {room}")
 
 
 def _readable_target(picked: Candidate, text: str) -> Candidate:
-    """The picked device, when it can answer the question.
-
-    The picked device, when it can be read, the question asks for one device's current state, and the device
-    measures every quantity the question names. Otherwise HandOff.
-    """
+    """The picked device, when it can answer the question; HandOff otherwise."""
     if picked.domain not in READABLE:
         raise HandOff(f"{picked.entity_id} cannot be read")
     _one_device_now(text)
@@ -623,11 +546,8 @@ def _measures(device: Candidate, quantity: str) -> bool:
 
 
 def _capable_target(action_name: str, picked: Candidate, devices: dict[str, Candidate]) -> Candidate:
-    """The picked device, or the one device in its room that can do the action.
-
-    A mute request for which the decider picked the satellite's microphone-mute switch means the room's media player.
-    Otherwise HandOff.
-    """
+    """The picked device, or the one device in its room that can do the action; HandOff otherwise."""
+    # A mute for the satellite's microphone-mute switch means the room's media player.
     domains = ACTIONS[action_name].domains
     if picked.domain in domains:
         return picked
@@ -654,16 +574,8 @@ def _slots(action: Action, target: Target, value: int | None) -> dict[str, Any]:
 
 
 def _placed(picked: Candidate, devices: dict[str, Candidate], text: str, room: str, here: str | None) -> None:
-    """Hand off when nothing places the decider's pick among the devices of its kind.
-
-    HandOff when nothing places the decider's pick among the devices of its kind: no room named, not in the
-    satellite's area, not the home's only one of its kind, and the text's words name it no better than another of
-    its kind, and it is not the only one of its kind that plays. Otherwise the decider's pick is a guess: one of two
-    lamps that share their name's words, one of two thermostats; for a question what plays with two players, the
-    playing one is the one meant. Also with a room: HandOff when the text names another device of its kind better (a
-    room taken from the previous answer must not turn a follow-up that names a device into a read of another device
-    of its kind).
-    """
+    """Hand off when nothing places the decider's pick among the devices of its kind, or the text names one better."""
+    # Also with a room: one taken from the previous answer must not turn a follow-up into a read of another device.
     kind = [d for d in devices.values() if (d.domain, d.measures) == (picked.domain, picked.measures)]
     if named_better_than(picked, kind, text):
         raise HandOff(f"{picked.entity_id}: the text names another device of its kind better")

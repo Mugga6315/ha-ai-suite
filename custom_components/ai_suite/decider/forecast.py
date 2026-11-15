@@ -1,9 +1,4 @@
-"""Weather forecasts for the days a question names.
-
-Weather forecasts: the decider recognises a question about the weather of coming days, code works out which days
-the text means (days.py) and reads HA's daily forecast (weather.get_forecasts) for them; the answer step words the
-facts. No HA imports.
-"""
+"""Weather forecasts for the days a question names."""
 
 from collections.abc import Mapping
 from datetime import date, datetime
@@ -17,16 +12,13 @@ FORECAST_DESCRIPTION = "ask about the weather of a coming day or days (tomorrow,
 # it may answer no to a question whether it will rain.
 RAIN = frozenset({"rainy", "pouring", "lightning-rainy", "snowy-rainy"})
 # From this many days the note leads with the days grouped by condition: with many day lines the answer step merges
-# days and moves the day the weather turns; two lines it words right.
+# days and moves the day the weather turns.
 SUMMARY_FROM_DAYS = 3
 
 
 def forecast_days(text: str, entries: list[tuple[datetime, dict]], today: date) -> list[date]:
-    """The days the question means.
-
-    "The next days" are every day the forecast holds after today: a fixed few would leave out that the rain of the
-    first days turns cloudy later. Named days stay as named.
-    """
+    """The days the question means."""
+    # "The next days" are every day the forecast holds: a fixed few would leave out how the weather turns later.
     if next_days_asked(text):
         return sorted({when.date() for when, _ in entries if when.date() > today})
     return days_asked(text, today)
@@ -54,10 +46,7 @@ def forecast_facts(
 
 
 def _summary(days: list[date], by_day: Mapping[date, dict], today: date, conditions: Mapping[str, str]) -> str:
-    """The days grouped by condition in a row.
-
-    The answer step then words where the weather turns from code, not from its own reading of the day lines.
-    """
+    """The days grouped by condition in a row, so the answer step takes where the weather turns from code."""
     runs: list[tuple[str, list[date]]] = []
     for day in days:
         condition = by_day[day].get("condition") or "unknown"

@@ -47,28 +47,18 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return front, body
 
 
-# Store machinery, not knowledge: INDEX.md is generated, CONSOLIDATE.md is a copy
-# of the consolidator's prompt that earlier versions wrote into the store. Both
-# scored on searches and sent the model reading example paths out of the prompt.
+# Store machinery, not knowledge: INDEX.md is generated, CONSOLIDATE.md is a copy of the librarian's prompt that older
+# versions wrote into the store.
 _MACHINERY_FILES = {"INDEX.md", "CONSOLIDATE.md"}
 
 
 def _is_hidden(rel: Path) -> bool:
-    """Is this path inside a dot-folder? Those are tooling, never knowledge.
-
-    A markdown editor may keep its own files there: Obsidian, for one, moves a
-    deleted note to .trash/ instead of deleting it, and such a note must not come
-    back in the INDEX or in search. So every dot-folder is out, not only .git.
-    """
+    """Is this path inside a dot-folder? Those are tooling, never knowledge."""
     return any(p.startswith(".") for p in rel.parts)
 
 
-# Indexed and readable, but not searchable: a changelog contains every word that
-# ever passed through the store, so it matches every query and buries real notes.
-# failures.md is the same shape - it is the self-improver's input, not knowledge.
-# The phrase that tells the analyzer a turn used this integration. It lives in
-# the injected prompt below; both sides must read it from here or a wording
-# change would silently stop every review.
+# The phrase that tells the analyzer a turn used this integration: both sides read it from here, or a wording change
+# would silently stop every review.
 PROMPT_MARKER = "search_brain finds notes"
 
 _LOG_FILE = "log.md"
@@ -79,12 +69,13 @@ _FAILURES_FILE = "failures.md"
 # self_improving.md holds auto-learned rules; it is injected into every prompt
 # like rules.md, so searching it would surface it against itself.
 SELF_IMPROVING_FILE = "self_improving.md"
-# not_a_defect.md is the human's veto over the self-improver: anything listed
-# there was reviewed and judged fine, so the analyzer must not flag it again and
-# no rule may be learned from it. Written by hand only - no agent writes here.
+# not_a_defect.md is the human's veto over the self-improver: nothing listed is flagged again or learned from.
+# Written by hand only, no agent writes here.
 _NOT_A_DEFECT_FILE = "not_a_defect.md"
 # rules.md compiled for decision agents (rule_compiler.py), next to it in memories/.
 COMPILED_RULES_FILE = "rules.compiled.json"
+# Indexed and readable, not searchable: a changelog matches every query and buries real notes; failures.md is the
+# self-improver's input, not knowledge.
 _UNSEARCHABLE = {
     _LOG_FILE, _FAILURES_FILE, SELF_IMPROVING_FILE, _NOT_A_DEFECT_FILE,
 }
@@ -104,30 +95,21 @@ case, in plain words - say what the assistant did and why it is fine.
 - Repeating a tool call the user explicitly asked to repeat ("check again") is
   correct, not a redundant call.
 """
-# failures.md is never pruned. It is the debugging record of what the assistant
-# got wrong, and a mistake stays interesting long after it was fixed - "when did
-# this start" is only answerable if the entry survives. Handled entries are
-# MARKED, not removed, and the marker is what keeps them out of the nightly
-# prompt so the file can grow without the prompt growing with it.
+# failures.md is never pruned, it is the debugging record: handled entries are marked, and the marker keeps them out
+# of the nightly prompt so the file grows without the prompt.
 _ACK_MARKER = "[ack "
 
 _LINE_CRUFT = re.compile(
     r"^\s*(?:[-*]\s+)?(?:\d{4}-\d{2}-\d{2}[T ][\d:.]+(?:[+-]\d{2}:\d{2}|Z)?\s+)?"
 )
 
-# Notes are related by hand with [[wikilinks]]
-# ([[target]] or [[target|alias]]). Search follows them one hop so a note the
-# query missed can still surface. Capped so a hub note can't flood the results.
+# [[target]] or [[target|alias]]: search follows them one hop, capped so a hub note cannot flood the results.
 _WIKILINK = re.compile(r"\[\[([^\]|#\n]+)")
 _MAX_LINKED = 5
 
 
 def word_in(word: str, text: str) -> bool:
-    """Whole-word match.
-
-    Bare substrings scored every note holding a short query word inside a longer word - the query word has to
-    stand alone.
-    """
+    """Whole-word match: a short word inside a longer one does not count."""
     return re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text) is not None
 
 
@@ -138,33 +120,19 @@ def _clean_lines(text: str) -> list[str]:
 
 
 def strip_bullet_prefix(text: str) -> str:
-    """Drop a leading '- ' and timestamp.
-
-    Public: the consolidator compares the `containing` snippets an LLM copied out of a memory file, and those carry the
-    stored prefix while the wiki page it was merged into does not.
-    """
+    """Drop a leading '- ' and timestamp."""
     return _LINE_CRUFT.sub("", text, count=1).strip()
 
 
 def _clip(text: str, limit: int, what: str) -> str:
-    """Truncate to a char budget and say so.
-
-    A silent clip is worse than a short one: rules past the cutoff are invisible
-    while looking present, so the model answers as if it had read them all and a
-    human reading the same file cannot tell why it did not follow one. Naming
-    the omission turns "the assistant ignores my rule" into a file to shorten.
-    """
+    """Truncate to a char budget and say so."""
     if len(text) <= limit:
         return text
     return f"{text[:limit]}\n[... {len(text) - limit} more chars of {what} not shown]"
 
 
 def _commit_message(subject: str, why: str = "") -> str:
-    """The commit message: the subject and the model's stated reason.
-
-    Commit subject plus the model's stated reason, so `git log` answers not
-    only what the assistant stored but why it thought it should.
-    """
+    """The commit message: the subject and the model's stated reason, so `git log` also says why."""
     why = " ".join(why.split())
     return f"{subject}\n\nwhy: {why}" if why else subject
 
@@ -172,26 +140,14 @@ def _commit_message(subject: str, why: str = "") -> str:
 def _norm_text(text: str) -> str:
     """Letters and digits only, for comparing a stored bullet against a re-sent one.
 
-    A model that rewrites a whole topic re-emits the text it was shown, and it
-    drifts: JSON escaping puts a backslash before each quote, whitespace
-    collapses, punctuation wanders. None of that means the entry changed.
-
-    Scope, so nobody trusts it further than it goes: it normalises escaping,
-    whitespace and punctuation, NOT transliteration - non-ASCII is dropped, so
-    a word with an umlaut does not match its re-emitted transliteration. It also
-    collapses short umlaut words hard, so an unrelated bullet could in principle
-    be mistaken for a duplicate and silently skipped. Both need a model that
-    transliterates its own stored text.
+    Non-ASCII is dropped, not transliterated: an umlaut word does not match its transliteration, and short umlaut words
+    collapse so far that an unrelated bullet may pass as a duplicate.
     """
     return re.sub(r"[^0-9a-z]+", "", text.lower())
 
 
 def _tags_of(front: dict[str, str]) -> str:
-    """The raw `tags` value without YAML list brackets.
-
-    Written as a flow sequence (`tags: [a, b]`), read here and in older files as
-    a bare `a, b` - both parse the same once the brackets are off.
-    """
+    """The raw `tags` value without YAML list brackets, so `[a, b]` and an older file's bare `a, b` read the same."""
     return front.get("tags", "").strip("[] ")
 
 
@@ -280,7 +236,7 @@ class Store:
 
     @property
     def root(self) -> Path:
-        """Store root. Public so callers stop reaching for _root."""
+        """The store's folder."""
         return self._root
 
     @property
@@ -345,9 +301,8 @@ class Store:
             front, body = _parse_frontmatter(text)
             rel = str(fpath.relative_to(self._root))
             stem = fpath.stem.lower()
-            # A [[link]] must resolve to the curated page, not the raw memory
-            # dump, and rglob order is arbitrary - so wiki/ wins the key and
-            # anything else only fills a gap.
+            # A [[link]] must resolve to the curated page, not the raw memory, and rglob order is arbitrary: wiki/
+            # wins the key, anything else only fills a gap.
             in_wiki = rel.startswith("wiki/")
             if in_wiki or stem not in by_key:
                 by_key[stem] = rel
@@ -385,12 +340,7 @@ class Store:
         return await self._hass.async_add_executor_job(self._search_sync, query)
 
     def _list_notes_sync(self, limit: int = 50) -> list[str]:
-        """Return relative paths of all user-facing .md files, capped at limit.
-
-        The unsearchable files are the self-improver's own bookkeeping, not
-        notes: offering them here had the assistant reading its failure log back
-        to the user as an available note.
-        """
+        """Return relative paths of all user-facing .md files, capped at limit."""
         notes: list[str] = []
         total = 0
         for fpath in sorted(self._root.rglob("*.md")):
@@ -413,9 +363,7 @@ class Store:
         """Read a note with path traversal protection."""
 
         def _read():
-            # resolve()/exists()/is_file() all hit the filesystem, so they belong
-            # in the executor with the read - a stalled network share must not
-            # block the event loop.
+            # resolve() and is_file() hit the filesystem: a stalled network share must not block the event loop.
             target = (self._root / path).resolve()
             if not target.is_relative_to(self._root):
                 raise ValueError(f"Path traversal denied: {path}")
@@ -500,9 +448,8 @@ class Store:
     async def async_clear_memory(self, path: str, containing: str) -> int:
         """Clear matching bullets from a memory file (consolidator use).
 
-        No lock, no commit, no index: the caller holds async_locked() for the whole run and commits once at the
-        end. Called bare from a service handler it would race a voice add_memory; use async_forget for that path
-        instead.
+        No lock, no commit, no index: the caller holds async_locked() and commits once at the end. Called bare it would
+        race a voice add_memory; use async_forget there.
         """
         return await self._hass.async_add_executor_job(
             self._clear_memory_lines_sync, path, containing
@@ -554,9 +501,7 @@ class Store:
     async def async_record_failure(self, tool: str, detail: str) -> None:
         """Note a tool call that could not be answered.
 
-        This is the raw signal for self-improvement: the nightly learner reads
-        it and may compile a repeated failure into a rule. No commit - a failed voice turn must not cost a git
-        write; the next real write picks the file up.
+        No commit: a failed voice turn must not cost a git write; the next real write picks the file up.
         """
         try:
             async with self._failures_lock:
@@ -567,9 +512,7 @@ class Store:
     async def async_read_failures(self, only_open: bool = True) -> str:
         """failures.md as text. The learner's input.
 
-        `only_open` hides entries already marked as handled, so a fixed mistake
-        is not learned from twice and the prompt stays the size of the backlog
-        rather than the size of the history.
+        `only_open` hides entries already marked as handled, so a fixed mistake is not learned from twice.
         """
         def _read():
             path = self._root / _FAILURES_FILE
@@ -590,9 +533,7 @@ class Store:
     async def async_acknowledge_failure(self, containing: str, note: str) -> int:
         """Mark the failures matching `containing` as handled. Never deletes.
 
-        Returns how many entries were marked. The entry keeps its original text
-        and gains `[ack <date>: <note>]`, so the debugging record stays complete
-        and a human can see both the mistake and what was done about it.
+        Returns how many entries were marked; each keeps its text and gains `[ack <date>: <note>]`.
         """
         def _ack() -> int:
             path = self._root / _FAILURES_FILE
@@ -622,12 +563,8 @@ class Store:
     async def async_add_rule(self, text: str) -> bool:
         """Append one rule to rules.md. Returns False if it is already there.
 
-        Append-only on purpose: rules.md is the human's file. Auto-learned rules
-        go to self_improving.md via async_add_self_improving_rule - nothing here
-        may edit or delete a rule a human wrote.
-
-        No index regeneration, no commit: the caller holds async_locked() and does both once at the end of its
-        run. A direct caller would write a rule that is absent from INDEX.md until the next nightly pass.
+        No index, no commit: the caller holds async_locked() and does both at the end of its run. A direct caller's
+        rule is absent from INDEX.md until the next nightly pass.
         """
         def _add() -> bool:
             text_clean = " ".join(_clean_lines(text))
@@ -647,10 +584,7 @@ class Store:
     async def async_add_self_improving_rule(self, text: str) -> bool:
         """Append one auto-learned rule to self_improving.md. False if duplicate.
 
-        Unlike rules.md (human-owned, append-only), this file is fully the
-        learner's: it may add here and also retract via async_clear_memory, so a
-        rule that later proves harmful can be removed by the loop itself.
-        No commit - the learner holds async_locked() and commits at the end.
+        No commit: the learner holds async_locked() and commits at the end.
         """
         def _add() -> bool:
             text_clean = " ".join(_clean_lines(text))
@@ -684,9 +618,7 @@ class Store:
     async def async_locked(self) -> AsyncGenerator[None]:
         """Acquire the store lock for the caller's full scope; commit inside it with async_commit_held.
 
-        The consolidator holds this lock across its entire write phase so that
-        a concurrent async_add_memory cannot add a fact that the clear step then
-        deletes because it shares containing text with an already-read memory.
+        Held across a whole write phase, so a concurrent add_memory cannot add a fact a later clear step deletes.
         """
         async with self._lock:
             yield
@@ -737,9 +669,8 @@ class Store:
         slug = self._topic_slug_sync(topic)
         text = " ".join(_clean_lines(text))
         path = self._memories / f"{slug}.md"
-        # A model that emits the same tool call twice in one turn is common. A
-        # duplicate is also fatal to rules triage: every snippet identifying it
-        # matches two bullets, so the move is refused as ambiguous.
+        # Models often send the same tool call twice in a turn, and a duplicate breaks rules triage: every snippet
+        # identifying it matches two bullets, so the move is refused as ambiguous.
         if path.exists() and _has_bullet(path, text):
             LOGGER.debug("add_memory: memories/%s.md already has this bullet", slug)
             return slug
@@ -759,13 +690,8 @@ class Store:
     async def async_move_rule(self, containing: str, to_topic: str) -> str:
         """Move one bullet out of rules.md into a normal memory topic.
 
-        rules.md is injected into every conversation, so a household fact filed
-        there costs prompt weight on every turn and tells the assistant to do
-        something it cannot do. The consolidator triages those out - but it may
-        only *move* them: the bullet is written to its new home and read back
-        before it is removed from rules.md, so a failed write cannot lose a rule.
-
-        No index regeneration, no commit: see async_add_rule.
+        The bullet is written to its topic and read back before it leaves rules.md. No index, no commit: see
+        async_add_rule.
         """
         result = await self._hass.async_add_executor_job(
             self._move_rule_sync, containing, to_topic
@@ -845,11 +771,8 @@ class Store:
                 if line.lstrip().startswith("- ")
             ]
             old_bullets = len(old_texts)
-            # Every stored entry still present and at least one added is an
-            # append wearing a replace costume. Sending it through here re-emits
-            # the whole topic as one tool argument, which can be cut off
-            # mid-string and kill the turn, and re-escapes the text it echoes
-            # back, mangling lines that were fine.
+            # Every stored entry kept and one added is an append in disguise: the whole topic as one tool argument can
+            # be cut off mid-string and kill the turn, and re-escaping the echoed text mangles lines that were fine.
             new_norm = {_norm_text(line) for line in lines}
             if (
                 old_bullets
@@ -861,9 +784,7 @@ class Store:
                     "changed. Use add_memory(text, topic) for a new fact; "
                     "update_memory is for changing or removing what is stored."
                 )
-            # bullet-count heuristic, no content diffing. A replace that
-            # halves a topic is the model forgetting to write back entries it was
-            # shown, which loses them.
+            # A replace that halves a topic is the model forgetting entries it was shown (bullet count, no diffing).
             if old_bullets and len(lines) * 2 < old_bullets:
                 raise ValueError(
                     f"Refused: this would cut memories/{slug}.md from {old_bullets} "
@@ -880,10 +801,7 @@ class Store:
     def _refuse_learned_rules(self, lines: list[str], rules: Path) -> None:
         """Learned rules belong to self_improving.md, never to the human's rules.md.
 
-        Told to remember one rule, a model may write rules.md with the learned
-        rules copied in; compiled for the decider, such a copy can make it hand
-        off a whole kind of command. Copies already in rules.md pass: refusing
-        them too would block every rewrite of such a store.
+        Copies already in rules.md pass: refusing them too would block every rewrite of such a store.
         """
         learned = self._memories / SELF_IMPROVING_FILE
         if not learned.exists():
@@ -1083,9 +1001,7 @@ class Store:
                 parts.append(
                     "## Active rules - always follow these when answering:\n"
                     + _clip(
-                        # Body only: the frontmatter is the store's bookkeeping,
-                        # and every header line would cost prompt budget on
-                        # every single turn.
+                        # Body only: the frontmatter is bookkeeping and would cost prompt budget on every turn.
                         _parse_frontmatter(rules.read_text(encoding="utf-8"))[1],
                         self._rules_chars,
                         "rules.md - shorten rules.md to see them",
@@ -1131,12 +1047,7 @@ class Store:
 
 
 def _anchor(words: list[str], body_lower: str) -> str:
-    """The first query word present in the body.
-
-    Anchoring on words[0] unconditionally showed the head of the file whenever
-    the first word was absent: a query whose first word the note lacks pointed
-    at the frontmatter instead of the hit.
-    """
+    """The first query word present in the body, so the snippet shows the hit and not the file's head."""
     return next((w for w in words if word_in(w, body_lower)), words[0] if words else "")
 
 
@@ -1159,9 +1070,7 @@ def _linked_notes(
 ) -> list[dict]:
     """Notes reached by following [[wikilinks]] out of the matched notes.
 
-    One hop only, deduped against the matches, capped at _MAX_LINKED. Each is
-    marked with the note it was linked from and gets a short preview, so the
-    model can tell a curated link from a keyword hit and read_note it if useful.
+    Each names the note it was linked from, so the model can tell a curated link from a keyword hit.
     """
     seen = {r["path"] for r in results}
     linked: list[dict] = []
@@ -1211,6 +1120,5 @@ def _old_slug(text: str) -> str:
 def _slug(text: str) -> str:
     text = re.sub(r"[^a-z0-9\s-]", "", text)
     text = re.sub(r"[\s-]+", "-", text)
-    # A topic of pure punctuation stripped to "" and wrote memories/.md - a
-    # dotfile, hidden from the store listing.
+    # A topic of pure punctuation would otherwise write memories/.md, a dotfile hidden from the store listing.
     return text[:60].strip("-") or "inbox"

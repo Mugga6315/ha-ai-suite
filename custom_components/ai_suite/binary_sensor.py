@@ -1,9 +1,4 @@
-"""A status light per tool set or feature that depends on something outside AI Suite.
-
-Emby on its server, History on the recorder, the Librarian on the LLM server. Each light is added under its subentry,
-so removing the tool set or feature removes its device and light. The store and the LLM server have no light of their
-own: their status is in the System health panel.
-"""
+"""A status light per tool set or feature that depends on something outside AI Suite."""
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -31,8 +26,7 @@ async def async_setup_entry(
     for subentry in entry.subentries.values():
         if subentry.subentry_type in HEALTH_TYPES:
             async_add_entities([HealthLight(coordinator, subentry)], config_subentry_id=subentry.subentry_id)
-    # In the background: a slow or unreachable service must not delay the entry's setup. The lights read
-    # unavailable until the first probe returns.
+    # In the background: a slow or unreachable service must not delay the entry's setup.
     entry.async_create_background_task(hass, coordinator.async_refresh(), "ai_suite_health_first_refresh")
 
 

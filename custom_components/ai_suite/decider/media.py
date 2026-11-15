@@ -1,11 +1,7 @@
 """What to play: the name and the artist from the request, the kind of media from the decider.
 
-Code cuts the name and the artist from the request (every language's phrasings, languages/), then the decider says
-what kind of media that name is. Music Assistant finds the item by name (music_assistant.play_media), as its own LLM
-blueprint has it filled (music-assistant/voice-support, llm_voice_script.yaml). No HA imports.
-
-Asking about the cut name beats asking about the whole request; a yes/no question per kind does worse, its answers
-are not comparable with each other.
+Music Assistant finds the item by name (music_assistant.play_media), as its own LLM blueprint has it filled
+(music-assistant/voice-support, llm_voice_script.yaml).
 """
 
 from collections.abc import Iterable
@@ -59,8 +55,7 @@ class Media:
 # Music Assistant's search (music_assistant.search) answers per media type under these keys.
 RESULT_KEY = {"artist": "artists", "album": "albums", "track": "tracks", "playlist": "playlists", "radio": "radio"}
 # An unsure media type is looked up among the decider's likeliest types only: by name alone nearly every name is
-# also a playlist, an album or a podcast somewhere (a station's name: a playlist and a radio station), among the
-# likeliest it is one (among radio, track, artist: radio).
+# also a playlist, an album or a podcast somewhere.
 LOOKUP_TYPES = 3
 
 
@@ -78,8 +73,7 @@ def type_found(name: str, candidates: Iterable[str], found: dict[str, list[dict]
 def named_in(text: str, rooms: Iterable[str], room_named: bool) -> tuple[str, str | None]:
     """The name and the artist the request names, its room phrase left out; HandOff when no name is left.
 
-    `room_named`: the decider heard a room, which the text may call by a word the home has no alias for (a room word
-    in another language than the area's name).
+    `room_named`: the decider heard a room, which the text may call by a word the home has no alias for.
     """
     rest = _POLITE.sub("", text.strip(" .!?"))
     rest = _PLAY_END.sub("", _PLAY.sub("", rest.strip()))
@@ -103,11 +97,7 @@ def kind_question(name: str, artist: str | None) -> tuple[str, dict]:
 
 
 def _without_room(text: str, rooms: Iterable[str], room_named: bool) -> str:
-    """The text without its room phrase.
-
-    That is one of the home's room names, else (a room was heard) the closing "im/in der/in the <word>". A title ending
-    like a room phrase stays when no room was heard.
-    """
+    """The text without its room phrase: a home's room name, else, when a room was heard, a closing "in <word>"."""
     if names := sorted({room for room in rooms if room}, key=len, reverse=True):
         known = "|".join(re.escape(name) for name in names)
         cut = re.sub(rf"\s+{_ROOM_WORDS}\s+(?:{known})\b", "", text, flags=re.IGNORECASE)

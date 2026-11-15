@@ -1,9 +1,4 @@
-"""Lists (shopping, to-do): the decider says what to do and on which list.
-
-For an item already on the list it picks one of the list's own entries, read from HA at request time, so a request in
-one language finds the entry written in another without any word map. A new item's text is cut from the request by
-rules (every language's phrasings, languages/). HA's own list intents do the change. No HA imports.
-"""
+"""Lists (shopping, to-do): the decider says what to do and on which list."""
 
 from dataclasses import dataclass
 import re
@@ -37,9 +32,8 @@ LIST_STEP = {"type": "choice", "instructions": "What should happen on the list?"
                           "list_done": "tick an entry that is on the list off as done",
                           "list_remove": "delete an entry from the list",
                           "list_read": "tell what is on the list or whether something is"}}
-# Ticking off is not removing: deciders take a request to tick an entry off for remove with confidence even after
-# the step, and text models remove the entry too. A request in these words never deletes or adds: a remove becomes
-# the tick-off, unless the text also says delete (deleting the entries already ticked off).
+# Ticking off is not removing, but deciders and text models remove the entry. A request in these words never deletes
+# or adds: a remove becomes the tick-off, unless the text also says delete.
 _TICK_OFF = pattern(lambda language: language.lists.tick_off)
 _DELETE = pattern(lambda language: language.lists.delete)
 
@@ -82,8 +76,7 @@ def checked_action(action: str, text: str) -> str:
 def item_to_add(text: str) -> str:
     """The new item the request names.
 
-    HandOff when none is found or the request names no list: writing something onto anything but a list is no list
-    request.
+    HandOff when none is found or the request names no list.
     """
     said = text.strip(" .!?")
     if needed := _NEED.match(said):

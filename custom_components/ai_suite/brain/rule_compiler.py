@@ -1,20 +1,7 @@
 """Household rules compiled for small decision models.
 
-A rule in rules.md is written for a human and a text model. A small decision
-model (a decision agent's decider) cannot read rules: given them as text, an
-alias rule (another word for a room) pulls other rooms' requests to the room
-it names. So the text model translates each rule once into fields
-code can use:
-
-- kind "answer": how replies are worded; for the model that words replies.
-- kind "name": the household's word for a room, device or list (an alias).
-- kind "request": which requests the rule changes: by words in the request
-  ("triggers") or by the kind of request whatever its words ("scopes"). A
-  decision agent hands such requests to the text model, which has the rule.
-- kind "text_model": about the text model's tools and notes; nothing else.
-
-REQUEST_KINDS and DEVICE_KINDS are the contract with decision agents: the
-request and device names their forms produce.
+The text model translates each rule once into fields code can use; REQUEST_KINDS and DEVICE_KINDS are the contract
+with decision agents: the request and device names their forms produce.
 """
 import hashlib
 import json
@@ -112,10 +99,9 @@ SCHEMA = {
 }
 
 
-# What a compiled rule must hold to be kept: the checks in this module (`checked`, `_shape_problem` and their helpers).
-# Raise it with a change there: no other part of the version would change, and rules a looser check kept would load
-# unchecked.
-CHECKS = 1
+# Version of this module's checks (`checked`, `_shape_problem` and helpers): raise it with a change there, as nothing
+# else in COMPILER_VERSION would change and rules a looser check kept would load unchecked.
+CHECKS = 2
 # Stored with the compiled rules: a change to the contract, the prompt, the schema or the checks changes it, and rules
 # compiled under another version are compiled again.
 COMPILER_VERSION = hashlib.sha256(
@@ -189,15 +175,14 @@ def _effect_shaped(effect: dict) -> bool:
 def checked(compiled: dict) -> dict:
     """The record with its effect checked against the contract and its examples.
 
-    The record with its effect kept only when the effect is a contract value and the triggers fit the rule's
-    examples. Otherwise the effect is null (the decision agent hands off) and "check" says why, for diagnostics.
-
-    A rule about words that passes loses its scopes: a model may give a rule about one name a scope covering every
-    request of that kind as well. One that fails keeps them, so its scopes hand off what a too narrow trigger misses.
+    A failing effect becomes null (the decision agent hands off) and "check" says why, for diagnostics.
     """
+    holds_a_limit = bool((compiled.get("effect") or {}).get("limit"))
     compiled = {**compiled, "effect": _normalized(compiled.get("effect"))}
     problem = _effect_problem(compiled) or _trigger_problem(compiled)
     if problem:
+        if compiled.get("triggers") and not holds_a_limit:
+            compiled = {**compiled, "scopes": []}
         return {**compiled, "effect": None, "check": problem}
     if compiled.get("triggers"):
         return {**compiled, "scopes": []}
@@ -233,11 +218,7 @@ def _effect_problem(compiled: dict) -> str | None:
 
 
 def _trigger_problem(compiled: dict) -> str | None:
-    """Only triggers can be checked here; whether an example falls in a scope needs the decider.
-
-    A look-alike that triggers a media type effect is no problem: the decision agent applies it only when the name
-    it cuts from the request is the effect's name, and hands off otherwise.
-    """
+    """Only triggers can be checked here; whether an example falls in a scope needs the decider."""
     triggers = compiled.get("triggers") or []
     if not triggers:
         return None
@@ -247,6 +228,7 @@ def _trigger_problem(compiled: dict) -> str | None:
         return "no examples to check the triggers with"
     if missed := [text for text in changed if not trigger_fires(triggers, text)]:
         return f"triggers {triggers} miss requests the rule changes: {missed}"
+    # A look-alike is harmless: the decision agent applies a media type only to the effect's own name.
     if (compiled["effect"] or {}).get("media_type"):
         return None
     if fired := [text for text in unchanged if trigger_fires(triggers, text)]:

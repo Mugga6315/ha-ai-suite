@@ -1,8 +1,4 @@
-"""The home as HA holds it, read for the decider, the rule compiler and the tools.
-
-It reads the exposed devices with their rooms and names, the entity a name means, the rooms' names, the room a request
-came from, the calendars' entries, and HA's own words for states.
-"""
+"""The home as HA holds it, read for the decider, the rule compiler and the tools."""
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -76,9 +72,8 @@ def exposed_states(hass: HomeAssistant, domain: str | None = None) -> list[State
 def entity_named(hass: HomeAssistant, given: str, *, domain: str | None = None, exposed_only: bool = True) -> str | None:
     """The entity `given` names: its id, its name or one of its aliases, in any case; None when no entity fits.
 
-    Exact matches only, so no wrong entity is picked. A model often writes an exposed name slugified into an id that
-    does not exist: such an id finds the entity of its domain whose name slugifies to it. `domain`: only its entities.
-    `exposed_only`: only the entities exposed to voice assistants.
+    Exact matches only; an id that does not exist finds the entity of its domain whose name slugifies to it.
+    `domain`: only its entities. `exposed_only`: only the entities exposed to voice assistants.
     """
 
     def allowed(entity_id: str) -> bool:
@@ -141,9 +136,8 @@ def satellite_area(hass: HomeAssistant, device_id: str | None) -> str | None:
 def unavailable_reason(hass: HomeAssistant, target: Target) -> str | None:
     """Why the device cannot act: HA has it as unavailable.
 
-    HA's actions only warn about such an entity, so the reply would claim what never happened (a play on an
-    unavailable player). None for a room's lights (HA's area intent picks the available ones) and an available
-    device.
+    HA's actions only warn about such an entity, so a reply would claim what never happened. None for a room's
+    lights (HA's area intent picks the available ones) and an available device.
     """
     if isinstance(target, RoomGroup):
         return None
@@ -156,8 +150,7 @@ def unavailable_reason(hass: HomeAssistant, target: Target) -> str | None:
 async def read_calendars(hass: HomeAssistant, calendars: list[str], start: datetime, end: datetime) -> CalendarRead:
     """The calendars' entries from `start` to `end`, each calendar asked on its own so that a broken one hides none.
 
-    Read without the user's context, as a read changes nothing. An entry that is no calendar entry is logged and left
-    out.
+    Read without the user's context, as a read changes nothing. An entry without a start is logged and left out.
     """
     events: dict[str, list[Event]] = {}
     failed: dict[str, str] = {}

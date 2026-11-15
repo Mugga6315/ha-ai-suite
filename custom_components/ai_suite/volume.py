@@ -1,11 +1,4 @@
-"""What a media player's volume is after a volume intent: the intent only sends it, the player's state shows it.
-
-HA's volume intents report success once the command is sent and answer with the players they targeted
-(`matched_states`): HassSetVolumeRelative as they were before it, HassSetVolume as read once its action returned,
-which can be before the device reported. The player shows its new volume when its device reports it, a moment
-later; an unavailable player, or one that ignores the command, never does. A reply built on the intent alone would
-confirm a change that did not happen.
-"""
+"""What a media player's volume is after a volume intent: the intent only sends it, the player's state shows it."""
 
 import asyncio
 from collections.abc import Mapping
@@ -28,7 +21,7 @@ from homeassistant.core import (
 from homeassistant.helpers.event import async_track_state_change_event
 
 VOLUME_INTENTS = frozenset({INTENT_SET_VOLUME, INTENT_SET_VOLUME_RELATIVE})
-# How long a player gets to report its new volume; players report it well within a second.
+# How long a player gets to report its new volume.
 VOLUME_TIMEOUT_S = 2.0
 # A level this near the asked one counts as reached: players round it to their own volume steps.
 _NEAR = 0.02
@@ -78,9 +71,8 @@ def asked_by(intent_type: str, slots: Mapping[str, Any]) -> Asked | None:
 async def async_volume_problem(hass: HomeAssistant, players: list[State], asked: Asked) -> str | None:
     """Which of the intent's players do not show the volume asked, with the ones that do; None when none fails.
 
-    Only players that showed a volume are checked: an off one shows none, and a command for an area still reaches the
-    others. Each gets VOLUME_TIMEOUT_S to report its new volume, read from its state changes; one already where the
-    command would take it is no failure. An unavailable player is named.
+    Off players (no volume) and ones already where the command would take them are not checked; unavailable ones are
+    named. Each gets VOLUME_TIMEOUT_S to report its new volume.
     """
     unavailable = [player.name for player in players if player.state == STATE_UNAVAILABLE]
     before = {

@@ -1,7 +1,4 @@
-"""Times as the model gives them and as the tools write them, for History and Calendar.
-
-The model is a tool caller, not a calendar: it picks the day, code does the date maths and writes the weekday.
-"""
+"""Times as the model gives them and as the tools write them, for History and Calendar."""
 
 from datetime import datetime, timedelta
 import re
@@ -14,9 +11,8 @@ BARE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # Indexed by date.weekday(); strftime's %A would follow the process locale.
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
-# Even with today's date from GetDateTime, a model may turn the user's yesterday into a two-day window starting the
-# day before, whatever the tool description says, so the arithmetic is done here. English keywords only: the model
-# translates the user's word for the day fine, it is the date maths it gets wrong.
+# Models get the date maths wrong, even with today's date at hand, so the day is worked out here. English keywords
+# only: the model translates the user's word for the day fine.
 NAMED_DAYS = {"today": 0, "yesterday": 1}
 
 
@@ -31,8 +27,7 @@ def parse_when(value: str | None, default: None, anchor: datetime | None = None)
 def parse_when(value: str | None, default: datetime | None, anchor: datetime | None = None) -> datetime | None:
     """Parse an ISO timestamp, 'today'/'yesterday', or a relative offset like '5d', '12h', '30m'.
 
-    Relative offsets count back from `anchor` (the end of the range), so start='5d' with an explicit end means five
-    days before that end, not five days before now.
+    Relative offsets count back from `anchor` (the end of the range) when given, not from now.
     """
     if not value:
         return default

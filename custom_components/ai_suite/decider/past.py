@@ -1,9 +1,4 @@
-"""A sensor's value over an earlier day, from HA's long-term statistics (recorder.get_statistics).
-
-The value is the highest, the lowest, the average or the total. The decider says which one is asked, the statistics say
-which the sensor has: a summing sensor (energy, water) has a total, a measuring one (temperature) the rest. No HA
-imports.
-"""
+"""A sensor's value over an earlier day, from HA's long-term statistics (recorder.get_statistics)."""
 
 from .turn import HandOff
 
@@ -21,9 +16,8 @@ STATISTICS = {
 # How a result note names each value. The question's description of a total would be spoken as part of the value,
 # its examples read as what was measured.
 NOTED = {"max": "the highest value", "min": "the lowest value", "mean": "the average", TOTAL: "the total"}
-# How a quantity was over the day, no single value named: its average, lowest and highest
-# (form.py decides it). No choice for the decider: its "none" also means "when did it happen", which statistics
-# cannot answer. Handed to the text model, it may give another room's or today's value.
+# How a quantity was over the day, no single value named (command.py decides it). No choice for the decider: its
+# "none" also means "when did it happen", which statistics cannot answer.
 DAY = "day"
 DAY_STATISTICS = ("mean", "min", "max")
 STATISTIC_QUESTION = {"type": "choice", "instructions": "What does the user ask for?", "criteria": STATISTICS}
@@ -40,7 +34,6 @@ def past_note(statistic: str, rows: list[dict], unit: str) -> str:
 def past_value(statistic: str, rows: list[dict]) -> float:
     """The statistic over the day's rows (hourly).
 
-    That is a total from a summing sensor's changes, or the highest, lowest or average from a measuring sensor's.
     HandOff when the sensor has no such value.
     """
     if statistic == TOTAL:

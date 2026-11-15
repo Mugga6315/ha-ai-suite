@@ -1,9 +1,4 @@
-"""What a media player plays after a play request: actions only send it, the player's state says whether it started.
-
-Music Assistant's play_media and HA's media_player.play_media return once the request is sent, also when the name
-matched another item, and HA skips an unavailable player without an error. A reply built on the action alone would
-confirm what never played.
-"""
+"""What a media player plays after a play request: actions only send it, the player's state says whether it started."""
 
 import asyncio
 from dataclasses import dataclass

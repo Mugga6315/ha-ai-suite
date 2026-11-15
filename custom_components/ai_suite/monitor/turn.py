@@ -1,12 +1,4 @@
-"""A turn of an AI Suite agent from its open to its record in the sender's queue.
-
-`async_recorded_turn` runs around the agent's `async_process`: it opens the turn in the recorder, looks up the voice
-pipeline run that carries it, records how it ended (the answer, or the error HA turns into one) and, once the turn
-closed, hands it to a closing task the entry owns. That task waits for the turn's effects window and, for a voice
-turn, for the run's end, the satellite's idle and the answer's playback; then it finds the run's STT audio (when the
-option is on), builds the record and queues it for the sender. The turn is released in any case, so the recorder's
-cap never fills with turns that will not be built. The turn itself only schedules that task.
-"""
+"""A turn of an AI Suite agent from its open to its record in the sender's queue."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
@@ -85,9 +77,8 @@ async def async_recorded_turn(
 def settings_text(decider: DeciderSettings, loop: LoopSettings | None, servers: Mapping[str, Any]) -> str:
     """An agent's settings as the record's settings blob: sorted JSON, without any key, token or password.
 
-    `servers`: the entry's data, of which the two server URLs (credentials in them removed), the thinking switch and
-    the prompt cache breakpoint are taken. The agent's settings hold no secret: models, prompt, tool APIs, sampling,
-    the decider's bar.
+    `servers`: the entry's data, of which the server URLs (credentials removed), the thinking switch and the prompt
+    cache breakpoint are taken. The agent's settings themselves hold no secret.
     """
     settings = {
         "decider": asdict(decider),
@@ -105,8 +96,7 @@ def settings_text(decider: DeciderSettings, loop: LoopSettings | None, servers: 
 async def _answered(process: Process) -> conversation.ConversationResult:
     """The turn's result, its answer recorded; an exception is recorded as the turn's error and raised on.
 
-    The turn's output is what HA speaks for the error (`_spoken`). A cancelled turn (its pipeline stopped) is an error
-    too: its record must still name a path.
+    A cancelled turn (its pipeline stopped) is an error too: its record must still name a path.
     """
     try:
         result = await process()

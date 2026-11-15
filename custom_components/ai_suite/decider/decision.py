@@ -1,4 +1,4 @@
-"""Pure decision logic: candidates and their labels, slot parsing, speech. No Home Assistant imports."""
+"""Pure decision logic: candidates and their labels, slot parsing, speech."""
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -54,9 +54,7 @@ def state_text(text: str, previous: str | None = None) -> str:
 def with_rules(state: str, rules: str | None) -> str:
     """The state with the household's rules from Second Brain after its head.
 
-    Only for a question where they help: the media type, which a rule may set for a name. In every question they
-    break rooms and reply languages: an alias rule that gives a room another name pulls a request for another room to
-    that room's lights.
+    Only for the media type question: in the others they break rooms and reply languages.
     """
     if not rules:
         return state
@@ -101,10 +99,9 @@ def known_text(c: Candidate, area_aliases: dict[str, list[str]]) -> str:
 def narrow(
     cands: list[Candidate], text: str, area_aliases: dict[str, list[str]], limit: int = MAX_ONE_ROUND
 ) -> list[Candidate]:
-    """The candidates sharing the most words with the request.
+    """The candidates sharing the most words with the request (name, area, area aliases, entity aliases).
 
-    Candidates sharing the most words with the request (name, area, area aliases, entity aliases),
-    normally at most `limit`. No shared word at all = no signal: all candidates come back unchanged.
+    At most `limit` but for a tie group; with no shared word at all, all candidates come back unchanged.
     """
     asked = words(text)
 
@@ -126,13 +123,10 @@ def measures(attributes: dict) -> str | None:
 
 
 def labelled(cands: list[Candidate]) -> dict[str, Candidate]:
-    """Unique option labels "Name (domain, measures, area)" -> candidate, in candidate order.
-
-    A device without an area says so: an area is not mandatory in HA, and without the word the decider cannot tell it
-    from a label that leaves the area out.
-    """
+    """Unique option labels "Name (domain, measures, area)" -> candidate, in candidate order."""
     out: dict[str, Candidate] = {}
     for c in cands:
+        # Without NO_AREA_LABEL the decider cannot tell a device without an area from a label that leaves it out.
         detail = ", ".join(x for x in (c.domain, c.measures, c.area or NO_AREA_LABEL) if x)
         base = f"{c.name} ({detail})"
         key, n = base, 1
@@ -199,21 +193,14 @@ def parse_temperature(text: str) -> float | None:
 
 
 def format_value(state: str, unit: str | None, language: str) -> str:
-    """The state as HA reports it, with the language's decimal separator.
-
-    The state as HA reports it (only the decimal separator follows the language); the answer LLM
-    decides how to say it.
-    """
+    """The state as HA reports it, with the language's decimal separator."""
     if language_of_tag(language).replies.decimal_comma:
         state = state.replace(".", ",")
     return f"{state} {unit}" if unit else state
 
 
 def located(c: Candidate) -> str:
-    """The device's name with its room, for a result note: the answer step says whose value it gives.
-
-    Without the room a single device's reading may be worded as the whole home's.
-    """
+    """The device's name with its room, for a result note: the answer step says whose value it gives."""
     return f"{c.name} (in {c.area})" if c.area else c.name
 
 
@@ -222,9 +209,7 @@ def read_answer(
 ) -> str:
     """Spoken answer for a read.
 
-    A thermostat's state is its mode and a weather entity's its condition, so both also speak their temperatures; a
-    player also says what it plays, unless its media is not current (`media_current`: an idle player keeps its last
-    title). A stale title is worded as playing now, even when the note says it played last.
+    `media_current`: False for an idle player, which keeps its last title; a stale title is worded as playing now.
     """
     current, target = attributes.get("current_temperature"), attributes.get("temperature")
     # Labelled: unlabelled, the answer LLM takes an album named like one of its songs for the song.

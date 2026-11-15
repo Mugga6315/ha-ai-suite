@@ -1,9 +1,4 @@
-"""The health of tool sets and features: one probe per one that has a status light, every SCAN_INTERVAL.
-
-Each probe reuses the set's or feature's own check, so a light agrees with what its settings form would say: Emby
-reachable, the recorder running for History, the librarian's LLM server reachable. One that turns unhealthy is logged
-once, and once more when it is back.
-"""
+"""The health of each tool set and feature with a status light, probed every SCAN_INTERVAL."""
 
 import asyncio
 from datetime import timedelta

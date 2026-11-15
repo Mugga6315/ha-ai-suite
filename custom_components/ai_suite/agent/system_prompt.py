@@ -1,7 +1,7 @@
 r"""The loop's system prompt in the parts Home Assistant joins it from.
 
-HA joins `user_prompt \n api_prompt [\n time_line] [\n extra_prompt]` (conversation/chat_log.py); the time line is
-left out when a GetDateTime tool exists. No Home Assistant imports: the trace monitor's record uses it too.
+HA joins `user_prompt \n api_prompt [\n time_line] [\n extra_prompt]` (conversation/chat_log.py). No Home Assistant
+imports: the trace monitor's record uses it too.
 """
 
 import re

@@ -44,9 +44,7 @@ class BrainAPI(llm.API):
     async def async_get_compiled_rules(self) -> list[dict]:
         """The household's rules compiled for small decision models (rule_compiler.py).
 
-        It holds one dict per rule in rules.md with the compiled fields: text, kind, names, triggers, scopes, effect,
-        examples, context. A rule changed since the last call is compiled now by the text model; one that cannot be
-        compiled has kind "pending".
+        A rule changed since the last call is compiled now by the text model; one that cannot be compiled is "pending".
         """
         records = await self._compiled_records()
         told = await self._store.async_read_rules_told()
@@ -63,7 +61,7 @@ class BrainAPI(llm.API):
             if not missing:
                 return compiled
             client = background_client(self.hass, self._entry)
-            if client is None:  # Memory has no background model: no rule can be compiled
+            if client is None:
                 return compiled + [{"text": rule, "kind": PENDING} for rule in missing]
             home = home_context(self.hass)
             slots = asyncio.Semaphore(MAX_PARALLEL_COMPILES)
@@ -90,8 +88,7 @@ class BrainAPI(llm.API):
     async def async_compile_ahead(self) -> None:
         """Compile changed rules right after they are written, so a decision agent's next turn does not wait.
 
-        Only where a decision agent has asked for compiled rules before: other homes never pay the extra text
-        model calls.
+        Does nothing until a decision agent has asked for compiled rules, so other homes pay no extra model calls.
         """
         if await self._store.async_has_compiled_rules():
             await self._compiled_records()

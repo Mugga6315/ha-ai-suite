@@ -1,9 +1,4 @@
-"""HA's play and volume tools with the player checked: they report success once the action is sent.
-
-HA skips an unavailable player without an error and a player may not start or change its volume, so the model would
-confirm what never happened. The checked play tool refuses an unavailable player and answers with what the player
-then plays (media_player/llm.py); the checked volume tools fail when a player does not show the volume asked.
-"""
+"""HA's play and volume tools with the player checked, as HA's own report success once the action is sent."""
 
 from homeassistant.components.media_player import (
     ATTR_MEDIA_CONTENT_ID,
@@ -67,7 +62,7 @@ class CheckedVolume(llm.Tool):
 
 
 class CheckedPlay(llm.Tool):
-    """HA's play tool, its result what the player plays."""
+    """HA's play tool, its result the player and what it plays."""
 
     def __init__(self, tool: llm.Tool) -> None:
         """Take HA's tool as the model sees it."""
@@ -77,10 +72,8 @@ class CheckedPlay(llm.Tool):
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> llm.ToolResult | JsonObjectType:
-        """Play on the player HA's tool picks, once it is available; HomeAssistantError when nothing new plays.
-
-        The arguments are read as HA's tool reads them: blank values, which models often send, are left out.
-        """
+        """Play on the player HA's tool picks, once it is available; HomeAssistantError when nothing new plays."""
+        # Read as HA's tool reads them: without the blank values models often send.
         args = self.parameters({key: value for key, value in tool_input.tool_args.items()
                                 if not intent.is_blank_slot_value(value)})
         player = _player(hass, llm_context, args)
@@ -93,7 +86,7 @@ class CheckedPlay(llm.Tool):
         if unchanged(started, before) and started.attributes.get(ATTR_MEDIA_CONTENT_ID) != args[ATTR_MEDIA_CONTENT_ID]:
             raise HomeAssistantError(f"{player.name} still plays {now_playing(started) or 'what it played'}: "
                                      "the item did not start")
-        return llm.ToolResult(data={"success": True, "now_playing": now_playing(started)})
+        return llm.ToolResult(data={"success": True, "player": player.name, "now_playing": now_playing(started)})
 
 
 def _player(hass: HomeAssistant, llm_context: llm.LLMContext, args: dict) -> State:

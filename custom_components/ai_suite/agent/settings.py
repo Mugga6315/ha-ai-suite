@@ -16,8 +16,8 @@ CONF_STRIP_EMOJIS = "strip_emojis"
 CONF_PARALLEL_TOOL_CALLS = "parallel_tool_calls"
 CONF_MAX_HISTORY = "max_message_history"  # earlier rounds kept; absent: all
 CONF_HIDDEN_TOOLS = "hidden_tools"  # tool names, as the model sees them, the agent leaves out
-# The model's earlier reasoning goes back with its earlier messages (`reasoning_content`, which vLLM, llama.cpp). Without it a thinking model may answer after a tool call inside an unclosed think block, and HA then
-# speaks nothing.
+# Earlier reasoning goes back with earlier messages: without it a thinking model may answer after a tool call inside an
+# unclosed think block, and HA then speaks nothing.
 CONF_SEND_REASONING = "send_reasoning"
 
 THINKING_ON, THINKING_OFF = "on", "off"
@@ -49,7 +49,7 @@ class LoopSettings:
     ) -> LoopSettings:
         """The settings as the subentry stores them, with the defaults for what it leaves out.
 
-        `thinking_switch`, `cache_breakpoint`: the LLM server's (LLMServer).
+        `thinking_switch`, `cache_breakpoint`: what the LLM server takes (LLMServer).
         """
         budget = data.get(CONF_THINKING_BUDGET)
         history = data.get(CONF_MAX_HISTORY)
@@ -72,11 +72,7 @@ class LoopSettings:
         )
 
     def server_fields(self) -> dict[str, Any]:
-        """The request's fields the OpenAI API does not define.
-
-        These are the chat template's thinking switch (vLLM, llama.cpp) and vLLM's thinking budget, only the ones set.
-        The switch only goes to a server that takes it, as for every other request (llm_client.ChatClient).
-        """
+        """The request's fields the OpenAI API does not define: the thinking switch and vLLM's thinking budget, if set."""
         fields: dict[str, Any] = {}
         if self.thinking is not None and self.thinking_switch:
             fields["chat_template_kwargs"] = {"enable_thinking": self.thinking == THINKING_ON}

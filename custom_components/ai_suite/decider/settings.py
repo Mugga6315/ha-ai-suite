@@ -1,4 +1,4 @@
-"""An agent's decision settings, from its conversation subentry. No HA imports."""
+"""An agent's decision settings, from its conversation subentry."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -17,18 +17,13 @@ from ..const import (
 
 @dataclass(frozen=True, slots=True)
 class DeciderSettings:
-    """`enabled`: the decision model goes first.
+    """An agent's decision settings."""
 
-    `model`: its name on the decision server (None: the only one). `answer_model`: words decided turns and splits
-    several requests (None: the text model). `fallback_agent`: takes the turns the decider passes on (None: the agent
-    loop).
-    """
-
-    enabled: bool
-    model: str | None
+    enabled: bool  # the decision model goes first
+    model: str | None  # its name on the decision server; None: the only one
     threshold: float
-    answer_model: str | None
-    fallback_agent: str | None
+    answer_model: str | None  # words decided turns and splits several requests; None: the text model
+    fallback_agent: str | None  # takes the turns the decider passes on; None: the agent loop
 
     @classmethod
     def from_subentry(cls, data: Mapping[str, Any]) -> DeciderSettings:

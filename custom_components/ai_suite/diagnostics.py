@@ -25,11 +25,7 @@ _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://\S+$")
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: AiSuiteConfigEntry) -> dict[str, Any]:
-    """The servers, the options, the store's files, the compiled household rules and every subentry's settings.
-
-    Secrets are redacted and URLs shown without their credentials. With the trace monitor's export on, also its
-    counters and times (monitor/setup.py).
-    """
+    """The servers, the options, the store's files, the compiled household rules and every subentry's settings."""
     memory = memory_subentry(entry)
     root = memory.data[CONF_STORE_LOCATION] if memory else None
     return {
